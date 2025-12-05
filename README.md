@@ -25,7 +25,7 @@ A modern, fast, and secure local file transfer tool.
 1. Download the latest `RapydShare.exe` from the [Releases Page](https://github.com/Overresurrect/RapydShare/releases).
 2. Run the application.
 3. Select a folder to share and click **Start Server**.
-4. Scan the QR code or enter the URL on your other device to start downloading.
+4. Enter the URL shown in the tool in your client device (e.g. iPhones, Android phones etc), remember to give the port number to the URL. 
 
 ## 💻 Development Setup (For Contributors)
 
