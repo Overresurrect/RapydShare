@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+aiofiles
+# GUI
+PyQt6
+PyQt6-Fluent-Widgets
+# Image/Video
+pillow
+opencv-python-headless
+# Packaging
+pyinstaller
+tinyaes
+packaging

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+env/
+.env
+build/
+dist/
+*.spec
+
+# Node/React
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# IDEs
+.vscode/
+.idea/
+
+# System
+Thumbs.db
+.DS_Store
+
+# Application Specific
+temp_thumbs/
+RapydShare_Thumbs/
