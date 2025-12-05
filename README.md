@@ -2,8 +2,7 @@
 
 A modern, fast, and secure local file transfer tool.
 
-![RapydShare Screenshot]
-(assets/Screenshot.jpg) <!-- You can add a screenshot later -->
+![RapydShare Screenshot](assets/Screenshot.jpg)
 
 ## 🚀 Features
 
@@ -38,11 +37,13 @@ A modern, fast, and secure local file transfer tool.
 ```bash
 git clone https://github.com/YOUR_USERNAME/RapydShare.git
 cd RapydShare
+```
 
 ### Backend Setup
 ```bash
 # Install dependencies
 pip install -r requirements.txt
+```
 
 ### Frontend Setup
 ```bash
@@ -50,10 +51,12 @@ cd frontend
 npm install
 # Start React dev server
 npm run dev
+```
 
 ### Running the App
 ```bash
 python main.py
+```
 
 ### Building the Executable
 ```bash
@@ -61,6 +64,9 @@ python main.py
 cd frontend
 npm run build
 cd ..
+```
 
 # Run the build script
+```bash
 python build.py
+```
