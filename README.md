@@ -1,6 +1,6 @@
 # RapydShare ⚡
 
-A modern, fast, and secure local file transfer tool with a native Windows 11 style interface.
+A modern, fast, and secure local file transfer tool.
 
 ![RapydShare Screenshot](assets/screenshot.jpg) <!-- You can add a screenshot later -->
 
@@ -37,3 +37,29 @@ A modern, fast, and secure local file transfer tool with a native Windows 11 sty
 ```bash
 git clone https://github.com/YOUR_USERNAME/RapydShare.git
 cd RapydShare
+
+### Backend Setup
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+### Frontend Setup
+```bash
+cd frontend
+npm install
+# Start React dev server
+npm run dev
+
+### Running the App
+```bash
+python main.py
+
+### Building the Executable
+```bash
+# First build the React frontend
+cd frontend
+npm run build
+cd ..
+
+# Run the build script
+python build.py
