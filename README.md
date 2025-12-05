@@ -2,7 +2,7 @@
 
 A modern, fast, and secure local file transfer tool.
 
-![RapydShare Screenshot](assets/screenshot.jpg) <!-- You can add a screenshot later -->
+![RapydShare Screenshot](/assets/screenshot.jpg) <!-- You can add a screenshot later -->
 
 ## 🚀 Features
 
