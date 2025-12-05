@@ -22,7 +22,7 @@ A modern, fast, and secure local file transfer tool.
 
 ## 📦 Installation & Usage (For Users)
 
-1. Download the latest `RapydShare.exe` from the [Releases Page]([LINK_TO_YOUR_GITHUB_RELEASES](https://github.com/Overresurrect/RapydShare/releases/tag/v1.0.0)).
+1. Download the latest `RapydShare.exe` from the [Releases Page](https://github.com/Overresurrect/RapydShare/releases/tag/v1.0.0).
 2. Run the application.
 3. Select a folder to share and click **Start Server**.
 4. Scan the QR code or enter the URL on your other device to start downloading.
