@@ -4,6 +4,7 @@ aiofiles
 # GUI
 PyQt6
 PyQt6-Fluent-Widgets
+qrcode[pil]
 # Image/Video
 pillow
 opencv-python-headless
