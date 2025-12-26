@@ -63,7 +63,7 @@ class ServerLauncher(QWidget):
         qr_layout.setSpacing(15)
 
         # QR Code Title
-        qr_title = TitleLabel("Scan to Connect", self.qr_panel)
+        qr_title = TitleLabel("Scan to connect", self.qr_panel)
         qr_layout.addWidget(qr_title, 0, Qt.AlignmentFlag.AlignHCenter)
 
         # QR Code Image Holder
