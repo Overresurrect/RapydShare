@@ -2,10 +2,10 @@
 
 A modern, fast, and secure local file transfer tool.
 
-![RapydShare Screenshot](assets/Screenshot.jpg)
+![RapydShare Screenshot](assets/Screenshot.jpg)\
 *RapydShare.exe*
 
-![RapydShare Browser Screenshot](assets/Screenshot-Web.jpg)
+![RapydShare Browser Screenshot](assets/Screenshot-Web.jpg)\
 *RapydShare Web Client*
 
 ## 🚀 Features
