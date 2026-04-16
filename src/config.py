@@ -19,6 +19,8 @@ class ServerConfig:
     USE_AUTH = False
     USERNAME = "admin"
     PASSWORD = "password"
+    ALLOW_UPLOAD = False
+    UPLOAD_DIR = ""
     # Temp folder for thumbs
     THUMB_CACHE_DIR = Path(tempfile.gettempdir()) / "RapydShare_Thumbs"
 

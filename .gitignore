@@ -20,6 +20,7 @@ frontend/.env
 # System
 Thumbs.db
 .DS_Store
+.claude
 
 # Application Specific
 temp_thumbs/

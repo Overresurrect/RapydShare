@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 aiofiles
+python-multipart
 # GUI
 PyQt6
 PyQt6-Fluent-Widgets

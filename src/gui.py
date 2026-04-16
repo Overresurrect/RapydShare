@@ -5,7 +5,7 @@ from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QFileDialog, QApplication, QFrame, QLabel
 )
-from PyQt6.QtGui import QIcon, QFont
+from PyQt6.QtGui import QIcon, QFont, QPixmap
 
 # Modern UI Components
 from qfluentwidgets import (
@@ -29,7 +29,7 @@ class ServerLauncher(QWidget):
             self.setWindowIcon(QIcon(config.ICON_PATH))
 
         # 1. Window Size
-        self.setFixedSize(680, 600)
+        self.setFixedSize(680, 740)
         self.setStyleSheet("background-color: #202020; color: white;")
 
         self.is_running = False
@@ -154,7 +154,40 @@ class ServerLauncher(QWidget):
         self.pass_input.setEnabled(False)
         self.pass_input.setFixedHeight(35)
         self.v_layout.addWidget(self.pass_input)
-        self.v_layout.addSpacing(25)
+        self.v_layout.addSpacing(15)
+
+        # --- UPLOAD SECTION ---
+        h_upload_header = QHBoxLayout()
+        h_upload_header.setSpacing(5)
+        lbl_upload = StrongBodyLabel("Allow Uploads", self)
+        btn_help_upload = TransparentToolButton(FIF.INFO, self)
+        btn_help_upload.setFixedSize(20, 20)
+        btn_help_upload.setIconSize(QSize(12, 12))
+        btn_help_upload.setToolTip("Let clients upload files into the folder you choose below.")
+        btn_help_upload.setStyleSheet("TransparentToolButton { border: none; background: transparent; color: #cccccc; }")
+        self.switch_upload = SwitchButton(parent=self)
+        self.switch_upload.checkedChanged.connect(self.toggle_upload)
+        h_upload_header.addWidget(lbl_upload)
+        h_upload_header.addWidget(btn_help_upload)
+        h_upload_header.addStretch(1)
+        h_upload_header.addWidget(self.switch_upload)
+        self.v_layout.addLayout(h_upload_header)
+
+        h_upload_folder = QHBoxLayout()
+        h_upload_folder.setSpacing(8)
+        self.upload_folder_input = LineEdit(self)
+        self.upload_folder_input.setPlaceholderText("Select a folder to receive uploads...")
+        self.upload_folder_input.setEnabled(False)
+        self.upload_folder_input.setFixedHeight(35)
+        self.btn_browse_upload = PushButton("Select", self)
+        self.btn_browse_upload.setFixedWidth(75)
+        self.btn_browse_upload.setFixedHeight(35)
+        self.btn_browse_upload.setEnabled(False)
+        self.btn_browse_upload.clicked.connect(self.browse_upload_folder)
+        h_upload_folder.addWidget(self.upload_folder_input)
+        h_upload_folder.addWidget(self.btn_browse_upload)
+        self.v_layout.addLayout(h_upload_folder)
+        self.v_layout.addSpacing(15)
 
         # --- SERVER BUTTON ---
         h_btn_layout = QHBoxLayout()
@@ -205,6 +238,16 @@ class ServerLauncher(QWidget):
         self.user_input.setEnabled(checked)
         self.pass_input.setEnabled(checked)
 
+    def toggle_upload(self, checked):
+        self.upload_folder_input.setEnabled(checked)
+        self.btn_browse_upload.setEnabled(checked)
+
+    def browse_upload_folder(self):
+        start_dir = self.upload_folder_input.text() or self.folder_input.text() or os.getcwd()
+        folder = QFileDialog.getExistingDirectory(self, "Select Upload Folder", start_dir)
+        if folder:
+            self.upload_folder_input.setText(folder)
+
     def toggle_server_state(self):
         if not self.is_running:
             self.start_server()
@@ -222,6 +265,24 @@ class ServerLauncher(QWidget):
         config.USE_AUTH = self.switch_auth.isChecked()
         config.USERNAME = self.user_input.text()
         config.PASSWORD = self.pass_input.text()
+
+        config.ALLOW_UPLOAD = self.switch_upload.isChecked()
+        if config.ALLOW_UPLOAD:
+            upload_dir = self.upload_folder_input.text().strip()
+            if not upload_dir or not os.path.isdir(upload_dir):
+                self.show_info("Error", "Upload folder does not exist.")
+                return
+            try:
+                shared_real = os.path.realpath(self.folder_input.text())
+                upload_real = os.path.realpath(upload_dir)
+                common = os.path.commonpath([shared_real, upload_real])
+                if os.path.normcase(common) != os.path.normcase(shared_real):
+                    self.show_info("Warning", "Upload folder is outside the shared folder. Clients won't see uploads.")
+            except ValueError:
+                self.show_info("Warning", "Upload folder is on a different drive than the shared folder.")
+            config.UPLOAD_DIR = upload_dir
+        else:
+            config.UPLOAD_DIR = ""
 
         if not os.path.isdir(config.ROOT_DIR):
             self.show_info("Error", "Selected folder does not exist.")
@@ -263,7 +324,7 @@ class ServerLauncher(QWidget):
 
         # --- Reset QR code panel ---
         self.qr_code_label.setText("Server is offline")
-        self.qr_code_label.setPixmap(None)
+        self.qr_code_label.setPixmap(QPixmap())
         self.url_label.setText("Ready to start")
         
         self.show_info("Offline", "Server has been stopped.")
@@ -272,12 +333,19 @@ class ServerLauncher(QWidget):
         self.btn_browse.setEnabled(enable)
         self.port_input.setEnabled(enable)
         self.switch_auth.setEnabled(enable)
+        self.switch_upload.setEnabled(enable)
         if enable and self.switch_auth.isChecked():
             self.user_input.setEnabled(True)
             self.pass_input.setEnabled(True)
         else:
             self.user_input.setEnabled(False)
             self.pass_input.setEnabled(False)
+        if enable and self.switch_upload.isChecked():
+            self.upload_folder_input.setEnabled(True)
+            self.btn_browse_upload.setEnabled(True)
+        else:
+            self.upload_folder_input.setEnabled(False)
+            self.btn_browse_upload.setEnabled(False)
 
     def show_success(self, title, msg):
         InfoBar.success(title=title, content=msg, orient=Qt.Orientation.Horizontal, isClosable=True, position=InfoBarPosition.TOP, duration=3000, parent=self)

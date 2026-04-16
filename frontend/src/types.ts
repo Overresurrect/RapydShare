@@ -7,3 +7,12 @@ export interface FileItem {
     mime: string | null;
     type: 'folder' | 'image' | 'video' | 'file';
 }
+
+export interface UploadTask {
+    id: string;
+    file: File;
+    progress: number;
+    status: 'queued' | 'uploading' | 'done' | 'error';
+    error?: string;
+    xhr?: XMLHttpRequest;
+}

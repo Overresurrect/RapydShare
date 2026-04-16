@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
-import type { FileItem } from './types';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import type { FileItem, UploadTask } from './types';
 import { FileCard } from './components/FileCard';
 import { PreviewModal } from './components/PreviewModal';
-import { ArrowLeft, Search, Moon, Sun, LayoutGrid, List, RefreshCw, FolderOpen } from 'lucide-react';
+import { UploadManager } from './components/UploadManager';
+import { ArrowLeft, Search, Moon, Sun, LayoutGrid, List, RefreshCw, FolderOpen, Upload } from 'lucide-react';
 import { clsx } from 'clsx';
 
 function App() {
@@ -13,6 +14,11 @@ function App() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [previewItem, setPreviewItem] = useState<FileItem | null>(null);
   const [isDark, setIsDark] = useState(false);
+  const [uploadEnabled, setUploadEnabled] = useState(false);
+  const [tasks, setTasks] = useState<UploadTask[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragCounter = useRef(0);
 
   // --- Initialization ---
   useEffect(() => {
@@ -28,6 +34,11 @@ function App() {
     if (savedView) setViewMode(savedView);
 
     fetchFiles('');
+
+    fetch('/api/server_info')
+      .then(res => res.ok ? res.json() : Promise.reject(res.status))
+      .then(info => setUploadEnabled(!!info.allow_upload))
+      .catch(() => setUploadEnabled(false));
   }, []);
 
   // --- Actions ---
@@ -86,6 +97,117 @@ function App() {
     }
   };
 
+  // --- Upload ---
+  const updateTask = useCallback((id: string, patch: Partial<UploadTask>) => {
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, ...patch } : t));
+  }, []);
+
+  const startUpload = useCallback((task: UploadTask) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload');
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) {
+        const pct = (e.loaded / e.total) * 100;
+        updateTask(task.id, { status: 'uploading', progress: pct });
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        updateTask(task.id, { status: 'done', progress: 100 });
+        fetchFiles(currentPath);
+      } else {
+        let msg = `Error ${xhr.status}`;
+        try {
+          const parsed = JSON.parse(xhr.responseText);
+          if (parsed && parsed.detail) msg = parsed.detail;
+        } catch {
+          // fall back to status code
+        }
+        updateTask(task.id, { status: 'error', error: msg });
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      updateTask(task.id, { status: 'error', error: 'Network error' });
+    });
+
+    xhr.addEventListener('abort', () => {
+      updateTask(task.id, { status: 'error', error: 'Cancelled' });
+    });
+
+    const form = new FormData();
+    form.append('file', task.file);
+    xhr.send(form);
+    updateTask(task.id, { xhr, status: 'uploading' });
+  }, [currentPath, updateTask]);
+
+  const enqueueFiles = useCallback((files: FileList | null) => {
+    if (!uploadEnabled || !files || files.length === 0) return;
+    const newTasks: UploadTask[] = Array.from(files).map(file => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      file,
+      progress: 0,
+      status: 'queued' as const,
+    }));
+    setTasks(prev => [...prev, ...newTasks]);
+    newTasks.forEach(startUpload);
+  }, [uploadEnabled, startUpload]);
+
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    enqueueFiles(e.target.files);
+    e.target.value = '';
+  };
+
+  const cancelTask = useCallback((id: string) => {
+    setTasks(prev => {
+      const task = prev.find(t => t.id === id);
+      if (task?.xhr) task.xhr.abort();
+      return prev;
+    });
+  }, []);
+
+  const dismissTask = useCallback((id: string) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const clearFinished = useCallback(() => {
+    setTasks(prev => prev.filter(t => t.status === 'uploading' || t.status === 'queued'));
+  }, []);
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    if (!uploadEnabled) return;
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    dragCounter.current += 1;
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!uploadEnabled) return;
+    e.preventDefault();
+    dragCounter.current -= 1;
+    if (dragCounter.current <= 0) {
+      dragCounter.current = 0;
+      setIsDragging(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!uploadEnabled) return;
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    if (!uploadEnabled) return;
+    e.preventDefault();
+    dragCounter.current = 0;
+    setIsDragging(false);
+    enqueueFiles(e.dataTransfer.files);
+  };
+
   // --- Filtering & Sorting ---
   const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase();
@@ -100,8 +222,14 @@ function App() {
   }, [items, searchQuery]);
 
   return (
-    <div className="min-h-screen flex flex-col transition-colors duration-200">
-      
+    <div
+      className="min-h-screen flex flex-col transition-colors duration-200"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+
       {/* --- HEADER --- */}
       <header className="sticky top-0 z-40 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 px-4 py-3">
         <div className="max-w-7xl mx-auto flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -144,6 +272,25 @@ function App() {
             <button onClick={() => fetchFiles(currentPath)} className="p-2 rounded-lg text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors">
               <RefreshCw size={20} className={clsx(loading && "animate-spin")} />
             </button>
+
+            {uploadEnabled && (
+              <>
+                <input
+                  type="file"
+                  multiple
+                  ref={fileInputRef}
+                  onChange={handleFilePick}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors text-sm font-medium"
+                >
+                  <Upload size={18} />
+                  <span className="hidden sm:inline">Upload</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -184,12 +331,31 @@ function App() {
 
       {/* --- PREVIEW MODAL --- */}
       {previewItem && (
-        <PreviewModal 
-          item={previewItem} 
-          onClose={() => setPreviewItem(null)} 
+        <PreviewModal
+          item={previewItem}
+          onClose={() => setPreviewItem(null)}
           onDownload={handleDownload}
         />
       )}
+
+      {/* --- DRAG OVERLAY --- */}
+      {isDragging && uploadEnabled && (
+        <div className="fixed inset-0 z-50 pointer-events-none bg-blue-500/20 border-4 border-dashed border-blue-500 flex items-center justify-center">
+          <div className="bg-white dark:bg-gray-900 border border-blue-500 rounded-2xl px-8 py-6 shadow-xl flex flex-col items-center gap-3">
+            <Upload size={40} className="text-blue-500" />
+            <p className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+              Drop files to upload
+            </p>
+          </div>
+        </div>
+      )}
+
+      <UploadManager
+        tasks={tasks}
+        onDismiss={dismissTask}
+        onCancel={cancelTask}
+        onClearAll={clearFinished}
+      />
 
     </div>
   );
