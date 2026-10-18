@@ -2,7 +2,7 @@ import unicodedata
 
 import pytest
 
-from src.uploads import numbered_names, sanitize_filename
+from src.uploads import MAX_NAME_BYTES, RESERVED_NAMES, RISKY_SUFFIXES, numbered_names, sanitize_filename
 
 
 @pytest.mark.parametrize("name,expected", [
@@ -112,3 +112,30 @@ def test_numbered_names():
     assert [next(names) for _ in range(2)] == ["README", "README (1)"]
     names = numbered_names("archive.tar.gz")
     assert [next(names) for _ in range(2)] == ["archive.tar.gz", "archive.tar (1).gz"]
+
+
+@pytest.mark.parametrize("suffix", [".lnk", ".url", ".scf", ".library-ms", ".searchConnector-ms"])
+def test_capping_never_leaves_a_risky_type(suffix):
+    # Capping cuts the junk after the risky suffix, so the check has to come after it
+    name = sanitize_filename("z" * (MAX_NAME_BYTES - len(suffix)) + suffix + "." + "q" * 250)
+    assert len(name.encode("utf-8")) <= MAX_NAME_BYTES
+    assert not name.lower().endswith(RISKY_SUFFIXES)
+    assert name.endswith(".txt")
+
+
+def test_the_reviewed_long_lnk_name_is_made_safe():
+    name = sanitize_filename("z" * 196 + ".lnk." + "q" * 250)
+    assert name == "z" * 196 + ".txt"
+
+
+def test_a_long_risky_name_keeps_txt_as_its_extension():
+    name = sanitize_filename("a" * 300 + ".lnk")
+    assert len(name.encode("utf-8")) == MAX_NAME_BYTES
+    assert name.endswith(".txt")
+
+
+def test_capping_never_leaves_a_reserved_name():
+    # Capping a long extension can cut the stem down to a device name
+    name = sanitize_filename("auxq." + "b" * 196)
+    assert len(name.encode("utf-8")) <= MAX_NAME_BYTES
+    assert name.split(".", 1)[0].rstrip().upper() not in RESERVED_NAMES

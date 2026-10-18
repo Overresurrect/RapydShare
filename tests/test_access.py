@@ -48,6 +48,29 @@ def test_every_api_route_needs_a_session(client, code_on, method, path):
     assert "www-authenticate" not in r.headers
 
 
+@pytest.mark.parametrize("path,target", [("/api/download", "hello.txt"), ("/api/download_folder", "docs")])
+def test_a_download_opened_as_a_page_without_a_session_goes_to_the_code_form(client, code_on, path, target):
+    # The web client opens downloads as a page, so JSON would strand the user on it
+    r = client.get(path, params={"path": target}, headers={"Sec-Fetch-Mode": "navigate"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/"
+    assert "set-cookie" not in r.headers
+
+
+@pytest.mark.parametrize("headers", [{}, {"Sec-Fetch-Mode": "cors"}, {"Sec-Fetch-Mode": "no-cors"}])
+def test_a_download_fetched_by_script_without_a_session_still_gets_json(client, code_on, headers):
+    r = client.get("/api/download", params={"path": "hello.txt"}, headers=headers, follow_redirects=False)
+    assert r.status_code == 401
+    assert r.json() == {"detail": "code_required"}
+
+
+def test_a_page_opened_with_a_session_is_served(client, code_on):
+    login(client, code_on)
+    r = client.get("/api/download", params={"path": "hello.txt"}, headers={"Sec-Fetch-Mode": "navigate"})
+    assert r.status_code == 200
+    assert r.content == b"hello"
+
+
 def test_a_made_up_session_is_refused(client, code_on):
     client.cookies.set(SESSION_COOKIE, "x" * 43)
     assert files_status(client) == 401

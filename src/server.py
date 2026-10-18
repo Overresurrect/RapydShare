@@ -13,10 +13,12 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from starlette.convertors import Convertor, register_url_convertor
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import ClientDisconnect
 
 from src.access import CODE_ALPHABET, CODE_LENGTH, SESSION_COOKIE, TooManyTries, access, normalize_code
@@ -35,6 +37,14 @@ app.add_middleware(BrowserProtection)
 MAX_LOGIN_BODY = 1024
 VIEW_SANDBOX = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'"
 MAX_OPEN_FILES = 10240
+ZIP_BUSY_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RapydShare</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.5">
+<p>Two folder downloads are already running. Try again in a moment.</p>
+<p><a href="/">Back to RapydShare</a></p>
+</body></html>
+"""
 
 # The running server, its thread and its socket
 _running: tuple[uvicorn.Server, threading.Thread, socket.socket] | None = None
@@ -56,6 +66,17 @@ register_url_convertor("access_code", CodeConvertor())
 def require_session(request: Request):
     if access.require_code and not access.is_valid(request.cookies.get(SESSION_COOKIE)):
         raise HTTPException(401, "code_required")
+
+def is_page_load(request: Request) -> bool:
+    """The browser is opening this as a page, as the web client does for downloads, not fetching it for a script."""
+    return request.headers.get("sec-fetch-mode") == "navigate"
+
+@app.exception_handler(StarletteHTTPException)
+async def send_pages_to_the_code_form(request: Request, exc: StarletteHTTPException):
+    # A download opened without a session would otherwise leave the user on raw JSON
+    if exc.status_code == 401 and exc.detail == "code_required" and is_page_load(request):
+        return RedirectResponse("/", 303)
+    return await http_exception_handler(request, exc)
 
 def start_session(request: Request, code, response: Response) -> Response:
     """Puts a session cookie on response if code is right. Wrong codes count toward the client's limit."""
@@ -136,13 +157,16 @@ def download_file(path: str):
     raise HTTPException(404)
 
 @app.get("/api/download_folder", dependencies=[Depends(require_session)])
-def download_folder(path: str):
+def download_folder(path: str, request: Request):
     real_path = resolve_in_root(path)
     if not real_path.is_dir(): raise HTTPException(400)
     root = Path(config.ROOT_DIR).resolve()
     skip = config.THUMB_CACHE_DIR.resolve() if config.THUMB_CACHE_DIR else None
     stream = zip_stream(real_path, root, skip)
-    if stream is None: raise HTTPException(503, headers={"Retry-After": "5"})
+    if stream is None:
+        busy = {"Retry-After": "5"}
+        if is_page_load(request): return HTMLResponse(ZIP_BUSY_PAGE, 503, headers=busy)
+        raise HTTPException(503, headers=busy)
     return ZipResponse(stream, f"{real_path.name}.zip")
 
 class ZipResponse(StreamingResponse):

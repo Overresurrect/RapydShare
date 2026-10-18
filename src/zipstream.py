@@ -10,7 +10,7 @@ from typing import AsyncIterator, Callable, Iterator
 import anyio
 import anyio.lowlevel
 
-from src.paths import is_hidden, is_listable, resolves_inside
+from src.paths import is_link, is_listable, resolves_inside
 
 MAX_ZIPS = 2
 CHUNK_BYTES = 1024 * 1024
@@ -46,13 +46,17 @@ class _Output:
 
 
 def zip_members(folder: Path, root: Path, skip: Path | None) -> Iterator[tuple[Path, str]]:
-    """Regular files under folder that the listing would show, with their names in the ZIP. root and skip must be resolved."""
+    """Regular files under folder that the listing would show, with their names in the ZIP.
+
+    folder must be checked by resolve_in_root, and root and skip resolved.
+    """
     for dirpath, dirnames, filenames in os.walk(folder, followlinks=False):
         here = Path(dirpath)
         if skip and resolves_inside(here, skip):
             dirnames.clear()
             continue
-        dirnames[:] = [d for d in dirnames if not is_hidden(here / d)]
+        # os.walk still goes into junctions. Leaving out all links keeps every folder walked a real one inside the share
+        dirnames[:] = [d for d in dirnames if not is_link(here / d) and is_listable(here / d, root)]
         for name in filenames:
             path = here / name
             if is_listable(path, root) and path.is_file():

@@ -180,6 +180,36 @@ def test_symlinks_that_stay_inside_are_included(client, share):
     assert download(client) == {"notes.txt": b"notes", "hello-link.txt": b"hello"}
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows junctions")
+def test_junctions_out_of_the_share_are_left_out(client, share):
+    import _winapi
+    _winapi.CreateJunction(str(share.parent / "shared-private"), str(share / "docs" / "junction"))
+    assert download(client) == {"notes.txt": b"notes"}
+    r = client.get("/api/files", params={"path": "docs"})
+    assert {item["name"] for item in r.json()} == {"notes.txt"}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows doesn't allow these names")
+def test_names_the_path_check_refuses_are_left_out(client, share):
+    # What's in the ZIP matches the listing, which leaves these out
+    (share / "docs" / "a:b.txt").write_text("x")
+    (share / "docs" / "a\\b.txt").write_text("x")
+    (share / "docs" / "c:d").mkdir()
+    (share / "docs" / "c:d" / "in.txt").write_text("x")
+    assert download(client) == {"notes.txt": b"notes"}
+
+
+def test_plain_files_are_zipped_without_resolving_each_one(client, share, monkeypatch):
+    from src import paths
+    (share / "docs" / "sub").mkdir()
+    for i in range(20):
+        (share / "docs" / "sub" / f"{i}.txt").write_text("x")
+    resolved = []
+    monkeypatch.setattr(paths, "resolves_inside", lambda p, root: resolved.append(p) or True)
+    assert len(download(client)) == 21
+    assert resolved == []
+
+
 def test_the_cache_folder_is_left_out(client, share, monkeypatch):
     cache = share / "docs" / "cache"
     cache.mkdir()
@@ -226,6 +256,27 @@ def test_a_third_concurrent_zip_gets_503(client, held):
     r = client.get("/api/download_folder", params={"path": "docs"})
     assert r.status_code == 503
     assert r.headers["retry-after"] == "5"
+    assert r.json() == {"detail": "Service Unavailable"}
+
+
+def test_a_third_zip_opened_as_a_page_gets_a_short_page(client, share, held):
+    # The web client opens folder downloads as a page, so JSON would strand the user on it
+    assert held() is not None
+    assert held() is not None
+    r = client.get("/api/download_folder", params={"path": "docs"}, headers={"Sec-Fetch-Mode": "navigate"})
+    assert r.status_code == 503
+    assert r.headers["retry-after"] == "5"
+    assert r.headers["content-type"].startswith("text/html")
+    assert "two folder downloads" in r.text.lower()
+    assert 'href="/"' in r.text
+    assert str(share) not in r.text
+
+
+def test_a_third_zip_fetched_by_script_still_gets_json(client, held):
+    assert held() is not None
+    assert held() is not None
+    r = client.get("/api/download_folder", params={"path": "docs"}, headers={"Sec-Fetch-Mode": "cors"})
+    assert r.status_code == 503
     assert r.json() == {"detail": "Service Unavailable"}
 
 

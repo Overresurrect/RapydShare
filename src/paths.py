@@ -38,6 +38,8 @@ def is_hidden(path: Path) -> bool:
     """True for hidden names and for entries with the OS hidden flag. The flag is read off the entry itself, not a link's target."""
     if is_hidden_name(path.name):
         return True
+    if path == Path(path.anchor):
+        return False  # NTFS drive roots carry the Hidden and System attributes
     try:
         st = path.lstat()
     except OSError:
@@ -67,10 +69,26 @@ def hidden_below(path: Path, root: Path) -> bool:
     return any(is_hidden(root.joinpath(*parts[:i + 1])) for i in range(len(parts)))
 
 
+def is_link(path: Path) -> bool:
+    """Symlinks, and Windows junctions, which resolve() follows but is_symlink() doesn't report."""
+    return path.is_symlink() or os.path.isjunction(path)
+
+
+def _name_is_servable(name: str) -> bool:
+    # On macOS "a:b" is refused by resolve_in_root, and "\" reads as a folder there and in the listing's paths
+    return ":" not in name and "\\" not in name and not _is_alias(name)
+
+
 def is_listable(entry: Path, root: Path) -> bool:
-    """The listing's version of resolve_in_root's checks: the entry is not hidden, and neither is anything it resolves to."""
-    return (not is_hidden(entry) and resolves_inside(entry, root)
-            and not hidden_below(entry.resolve(), root))
+    """The listing's version of resolve_in_root's checks: the entry is not hidden, and neither is anything it resolves to.
+
+    entry's folder must be resolved, inside root and already checked, so only links need resolving.
+    """
+    if not _name_is_servable(entry.name) or is_hidden(entry):
+        return False
+    if not is_link(entry):
+        return True
+    return resolves_inside(entry, root) and not hidden_below(entry.resolve(), root)
 
 
 def resolve_in_root(path: str) -> Path:
@@ -132,6 +150,13 @@ def _refuse_share_folder(folder: str) -> str | None:
     inside_home = path.is_relative_to(home)
     if not inside_home and any(_is_or_inside(path, f.resolve()) for f in _os_folders()):
         return "That's a system folder. Choose a different one."
-    if is_hidden(path) or (inside_home and hidden_below(path, home)):
+    # ~/Library is hidden, but the cloud folders inside it are meant to be used
+    base = next((c for c in _cloud_roots(home) if path.is_relative_to(c)), home)
+    if is_hidden(path) or (inside_home and hidden_below(path, base)):
         return "That folder is hidden. Choose a different one."
     return None
+
+
+def _cloud_roots(home: Path) -> list[Path]:
+    """Where iCloud Drive, and Dropbox, OneDrive, Google Drive and Box, keep their folders on macOS."""
+    return [home / "Library" / "Mobile Documents", home / "Library" / "CloudStorage"]

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.paths import refuse_share_folder
+from src.paths import is_hidden, refuse_share_folder
 
 
 @pytest.fixture
@@ -151,3 +151,65 @@ def test_a_sibling_of_home_is_allowed(home, no_os_folders):
 def test_a_subfolder_of_home_is_still_allowed_when_its_parent_is_refused(home, no_os_folders):
     (home / "Photos" / "2026").mkdir(parents=True)
     assert refuse_share_folder(str(home / "Photos" / "2026")) is None
+
+
+# --- Cloud folders inside ~/Library ---
+
+@pytest.fixture
+def library(home):
+    """A made-up ~/Library, flagged hidden on macOS like the real one."""
+    library = home / "Library"
+    (library / "Mail").mkdir(parents=True)
+    (library / "Mobile Documents" / "com~apple~CloudDocs" / "Work").mkdir(parents=True)
+    (library / "CloudStorage" / "Dropbox" / "Work").mkdir(parents=True)
+    if sys.platform == "darwin":
+        os.chflags(library, stat.UF_HIDDEN)
+    return library
+
+
+@pytest.mark.parametrize("folder", [
+    "Mobile Documents/com~apple~CloudDocs",  # iCloud Drive
+    "Mobile Documents/com~apple~CloudDocs/Work",
+    "CloudStorage/Dropbox",  # Dropbox, OneDrive, Google Drive, Box
+    "CloudStorage/Dropbox/Work",
+])
+def test_cloud_folders_inside_library_are_allowed(library, folder):
+    assert refuse_share_folder(str(library / folder)) is None
+
+
+def test_library_and_its_other_folders_stay_refused_next_to_cloud_folders(library):
+    if sys.platform != "darwin":
+        pytest.skip("macOS flag")
+    assert refuse_share_folder(str(library)) is not None
+    assert refuse_share_folder(str(library / "Mail")) is not None
+
+
+def test_a_hidden_folder_inside_a_cloud_folder_is_refused(library):
+    hidden = library / "CloudStorage" / "Dropbox" / ".private"
+    hidden.mkdir()
+    assert refuse_share_folder(str(hidden)) is not None
+
+
+# --- Drive roots on Windows ---
+
+def _system_drive():
+    return Path(os.environ.get("SystemDrive", "C:") + "\\")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS drive roots")
+def test_a_drive_root_is_not_hidden(tmp_path):
+    # NTFS roots carry the Hidden and System attributes
+    assert not is_hidden(Path(tmp_path.anchor))
+    assert not is_hidden(_system_drive())
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS drive roots")
+def test_the_root_of_another_drive_is_allowed(tmp_path):
+    # tmp_path is on C: on GitHub runners, while the checkout is on D:
+    home = Path.home().resolve()
+    drives = {Path(p.anchor) for p in (tmp_path, Path(__file__).resolve())}
+    drives = [d for d in drives if d != _system_drive() and not home.is_relative_to(d)]
+    if not drives:
+        pytest.skip("No drive here other than the system drive")
+    for drive in drives:
+        assert refuse_share_folder(str(drive)) is None

@@ -53,11 +53,12 @@ def sanitize_filename(name: str) -> str:
     name = unicodedata.normalize("NFC", name)
     name = name.replace("\\", "/").rsplit("/", 1)[-1]
     name = "".join(map(_clean_char, name)).strip(" .")
-    if name.lower().endswith(RISKY_SUFFIXES) or name.lower() == "desktop.ini":
-        name += ".txt"
+    # Capping first, since cutting a long name can leave a risky or reserved one. Neither fix below undoes the other
     name = _cap(name)
     if not name:
         return "unnamed"
+    if name.lower().endswith(RISKY_SUFFIXES) or name.lower() == "desktop.ini":
+        name = _cap(name + ".txt")  # .txt is the extension, so capping keeps it
     # Windows treats "aux.tar.gz" and "aux .txt" like "aux", so check everything before the first dot
     if name.split(".", 1)[0].rstrip().upper() in RESERVED_NAMES:
         name = _cap("_" + name)

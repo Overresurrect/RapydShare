@@ -5,6 +5,7 @@ import sys
 import pytest
 from PIL import Image
 
+from src import paths
 from src.paths import is_hidden, is_hidden_name, resolves_inside
 
 FILE_ENDPOINTS = ["download", "view", "thumb"]
@@ -177,3 +178,35 @@ def test_symlink_inside_is_listed(client, share):
     except OSError:
         pytest.skip("Can't create symlinks here (Windows without Developer Mode)")
     assert listed_names(client) == BASE_LISTING | {"docs-link"}
+
+
+# --- Names the path check refuses ---
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows doesn't allow these names")
+@pytest.mark.parametrize("name", ["a:b.txt", "a\\b.txt", "x\\.env"])
+def test_names_the_path_check_refuses_are_left_out_of_the_listing(client, share, name):
+    # Listed means downloadable: resolve_in_root refuses ":", and "\" reads as a folder
+    (share / "docs" / name).write_text("x")
+    (share / name).mkdir()
+    assert listed_names(client, "docs") == {"notes.txt"}
+    assert listed_names(client) == BASE_LISTING
+
+
+# --- Speed ---
+
+def test_plain_entries_are_listed_without_resolving_each_one(client, share, monkeypatch):
+    for i in range(20):
+        (share / "docs" / f"{i}.txt").write_text("x")
+        (share / "docs" / f"folder{i}").mkdir()
+    resolved = []
+    monkeypatch.setattr(paths, "resolves_inside", lambda p, root: resolved.append(p) or True)
+    assert len(listed_names(client, "docs")) == 41
+    assert resolved == []
+
+
+def test_symlinked_entries_are_still_resolved(client, share, link_out, monkeypatch):
+    resolved = []
+    real = paths.resolves_inside
+    monkeypatch.setattr(paths, "resolves_inside", lambda p, root: resolved.append(p.name) or real(p, root))
+    assert listed_names(client) == BASE_LISTING
+    assert resolved == ["link"]
