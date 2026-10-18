@@ -15,6 +15,7 @@ from qfluentwidgets import (
     FluentIcon as FIF, setTheme, Theme, setThemeColor, TitleLabel
 )
 
+from src.access import access
 from src.config import config
 from src.server import run_server, stop_server_logic
 # Import our new QR code generator and the existing IP function
@@ -270,10 +271,6 @@ class ServerLauncher(QWidget):
             self.show_info("Error", "Port must be a number.")
             return
 
-        config.USE_AUTH = self.switch_auth.isChecked()
-        config.USERNAME = self.user_input.text()
-        config.PASSWORD = self.pass_input.text()
-
         config.ALLOW_UPLOAD = self.switch_upload.isChecked()
         if config.ALLOW_UPLOAD:
             upload_dir = self.upload_folder_input.text().strip()
@@ -299,6 +296,7 @@ class ServerLauncher(QWidget):
         self.set_inputs_enabled(False)
         self.folder_input.setReadOnly(True)
 
+        code = access.start(config.REQUIRE_CODE)
         self.server_thread = threading.Thread(target=run_server, daemon=True)
         self.server_thread.start()
 
@@ -306,7 +304,7 @@ class ServerLauncher(QWidget):
         self.apply_button_style(started=True)
 
         ip = get_local_ip()
-        link = f"http://{ip}:{config.PORT}"
+        link = f"http://{ip}:{config.PORT}" + (f"/{code}" if code else "")
         self.status_label.setText(f"Running at: {link}")
 
         # --- Generate and display QR code ---
@@ -323,6 +321,7 @@ class ServerLauncher(QWidget):
 
     def stop_server(self):
         stop_server_logic()
+        access.stop()
 
         self.is_running = False
         self.apply_button_style(started=False)

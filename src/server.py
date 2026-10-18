@@ -1,7 +1,7 @@
 import os
 import re
+import json
 import uvicorn
-import secrets
 import mimetypes
 import shutil
 import asyncio
@@ -9,19 +9,21 @@ import uuid
 import aiofiles
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import FastAPI, HTTPException, Depends, status, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import FastAPI, HTTPException, Depends, Request, Response, UploadFile, File
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
+from starlette.convertors import Convertor, register_url_convertor
 
+from src.access import CODE_ALPHABET, CODE_LENGTH, SESSION_COOKIE, TooManyTries, access, normalize_code
 from src.config import config
 from src.paths import is_listable, resolve_in_root
 from src.utils import generate_thumbnail
 
 executor = ThreadPoolExecutor(max_workers=4)
-security = HTTPBasic(auto_error=False)
 app = FastAPI()
+
+MAX_LOGIN_BODY = 1024
 
 # Global variable to hold the server instance
 global_server = None
@@ -58,19 +60,55 @@ def resolve_unique_path(target_dir: Path, filename: str) -> Path:
             return candidate
         i += 1
 
-def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
-    if not config.USE_AUTH: return "guest"
-    if not credentials:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Auth required", {"WWW-Authenticate": "Basic"})
-    
-    is_correct = (secrets.compare_digest(credentials.username, config.USERNAME) and 
-                  secrets.compare_digest(credentials.password, config.PASSWORD))
-    
-    if not is_correct:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid creds", {"WWW-Authenticate": "Basic"})
-    return credentials.username
+class CodeConvertor(Convertor):
+    """Matches one path segment that is the access code, in any case and with any dashes."""
+    regex = f"-*(?:[{CODE_ALPHABET}{CODE_ALPHABET.lower()}]-*){{{CODE_LENGTH}}}"
 
-@app.get("/api/files", dependencies=[Depends(get_current_username)])
+    def convert(self, value: str) -> str:
+        return normalize_code(value)
+
+    def to_string(self, value: str) -> str:
+        return value
+
+register_url_convertor("access_code", CodeConvertor())
+
+def require_session(request: Request):
+    if access.require_code and not access.is_valid(request.cookies.get(SESSION_COOKIE)):
+        raise HTTPException(401, "code_required")
+
+def start_session(request: Request, code, response: Response) -> Response:
+    """Puts a session cookie on response if code is right. Wrong codes count toward the client's limit."""
+    try:
+        token = access.try_code(request.client.host, code)
+    except TooManyTries as e:
+        raise HTTPException(429, "too_many_tries", {"Retry-After": str(e.retry_after)})
+    if token is None:
+        raise HTTPException(401, "wrong_code")
+    response.set_cookie(SESSION_COOKIE, token, path="/", httponly=True, samesite="strict")
+    return response
+
+@app.post("/api/login")
+async def login(request: Request):
+    length = request.headers.get("content-length")
+    if length is None: raise HTTPException(411)
+    if not length.isdigit(): raise HTTPException(400)
+    if int(length) > MAX_LOGIN_BODY: raise HTTPException(413)
+    if not access.require_code: return Response(status_code=204)
+    try:
+        body = json.loads(await request.body())
+    except ValueError:
+        raise HTTPException(400)
+    code = body.get("code") if isinstance(body, dict) else None
+    return start_session(request, code, Response(status_code=204))
+
+@app.post("/api/logout", dependencies=[Depends(require_session)])
+async def logout(request: Request):
+    access.end_session(request.cookies.get(SESSION_COOKIE))
+    response = Response(status_code=204)
+    response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, samesite="strict")
+    return response
+
+@app.get("/api/files", dependencies=[Depends(require_session)])
 async def list_files(path: str = ""):
     req_path = resolve_in_root(path)
     if not req_path.is_dir(): raise HTTPException(404)
@@ -100,7 +138,7 @@ async def list_files(path: str = ""):
     except OSError: raise HTTPException(404)
     return items
 
-@app.get("/api/thumb", dependencies=[Depends(get_current_username)])
+@app.get("/api/thumb", dependencies=[Depends(require_session)])
 async def get_thumb(path: str):
     real_path = resolve_in_root(path)
     import hashlib
@@ -114,13 +152,13 @@ async def get_thumb(path: str):
         if success: return FileResponse(thumb_path)
     raise HTTPException(404)
 
-@app.get("/api/download", dependencies=[Depends(get_current_username)])
+@app.get("/api/download", dependencies=[Depends(require_session)])
 async def download_file(path: str):
     real_path = resolve_in_root(path)
     if real_path.is_file(): return FileResponse(real_path, filename=real_path.name)
     raise HTTPException(404)
 
-@app.get("/api/download_folder", dependencies=[Depends(get_current_username)])
+@app.get("/api/download_folder", dependencies=[Depends(require_session)])
 async def download_folder(path: str):
     real_path = resolve_in_root(path)
     if not real_path.is_dir(): raise HTTPException(400)
@@ -133,17 +171,17 @@ async def download_folder(path: str):
         raise
     return FileResponse(temp_zip, filename=f"{real_path.name}.zip", background=BackgroundTask(temp_zip.unlink))
 
-@app.get("/api/view", dependencies=[Depends(get_current_username)])
+@app.get("/api/view", dependencies=[Depends(require_session)])
 async def view_media(path: str):
     real_path = resolve_in_root(path)
     if real_path.is_file(): return FileResponse(real_path)
     raise HTTPException(404)
 
-@app.get("/api/server_info", dependencies=[Depends(get_current_username)])
+@app.get("/api/server_info", dependencies=[Depends(require_session)])
 async def server_info():
-    return {"allow_upload": bool(config.ALLOW_UPLOAD)}
+    return {"allow_upload": bool(config.ALLOW_UPLOAD), "require_code": access.require_code}
 
-@app.post("/api/upload", dependencies=[Depends(get_current_username)])
+@app.post("/api/upload", dependencies=[Depends(require_session)])
 async def upload_file(file: UploadFile = File(...)):
     if not config.ALLOW_UPLOAD:
         raise HTTPException(403, "Uploads are disabled")
@@ -193,6 +231,12 @@ async def upload_file(file: UploadFile = File(...)):
         "path": rel_path,
         "saved_outside_root": saved_outside_root,
     })
+
+# Before the static mount. It only matches code-shaped segments, so static files (which have dots) still reach the mount
+@app.get("/{code:access_code}", include_in_schema=False)
+async def enter_with_code(code: str, request: Request):
+    if not access.require_code: return RedirectResponse("/", 303)
+    return start_session(request, code, RedirectResponse("/", 303))
 
 if os.path.exists(config.FRONTEND_DIST_DIR):
     app.mount("/", StaticFiles(directory=config.FRONTEND_DIST_DIR, html=True), name="static")

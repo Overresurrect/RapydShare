@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from src.access import access
 from src.config import config
 from src.server import app
 
@@ -38,13 +39,17 @@ def share(tmp_path, monkeypatch):
     cache.mkdir()
 
     monkeypatch.setattr(config, "ROOT_DIR", str(root))
-    monkeypatch.setattr(config, "USE_AUTH", False)
-    monkeypatch.setattr(config, "USERNAME", "admin")
-    monkeypatch.setattr(config, "PASSWORD", "1234")
     monkeypatch.setattr(config, "ALLOW_UPLOAD", False)
     monkeypatch.setattr(config, "UPLOAD_DIR", "")
     monkeypatch.setattr(config, "THUMB_CACHE_DIR", cache)
+    access.start(require_code=False)
     return root
+
+
+@pytest.fixture
+def code_on(share):
+    """Turns the access code on and returns it."""
+    return access.start(require_code=True)
 
 
 @pytest.fixture

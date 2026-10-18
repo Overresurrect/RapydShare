@@ -16,9 +16,7 @@ def get_resource_path(relative_path):
 class ServerConfig:
     ROOT_DIR = ""
     PORT = 8000
-    USE_AUTH = False
-    USERNAME = "admin"
-    PASSWORD = "password"
+    REQUIRE_CODE = True
     ALLOW_UPLOAD = False
     UPLOAD_DIR = ""
     # Temp folder for thumbs
