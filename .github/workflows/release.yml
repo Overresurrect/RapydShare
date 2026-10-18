@@ -1,0 +1,79 @@
+name: Release build
+
+# Builds RapydShare.exe on Windows and attaches it to a release (a draft is fine).
+# Run it from the Actions tab with the release's tag, e.g. v1.4.0.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of the release to attach the build to, e.g. v1.4.0
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows exe
+    runs-on: windows-latest
+    # Uploading to the release needs write access; nothing else in this repo's CI gets it
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      # build.py prints emoji, which Windows' default pipe encoding can't encode
+      PYTHONUTF8: "1"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Find the commit the release points at
+        id: release
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Tag must look like v1.4.0"; exit 1; }
+          commit=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq .targetCommitish)
+          [ -n "$commit" ] || { echo "::error::No release found for $TAG"; exit 1; }
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.release.outputs.commit }}
+
+      - name: Check the version matches the tag
+        run: |
+          version=$(sed -n "s/.*ProductVersion', u'\([0-9.]*\)'.*/\1/p" version_info.txt)
+          [ "v$version" = "$TAG" ] || { echo "::error::version_info.txt says $version, but the tag is $TAG"; exit 1; }
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the locked Python dependencies
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Build the web client
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build RapydShare.exe
+        run: python build.py
+
+      - name: Attach to the release and fill in the checksum
+        run: |
+          hash=$(python -c "import hashlib; print(hashlib.sha256(open('dist/RapydShare.exe', 'rb').read()).hexdigest())")
+          gh release upload "$TAG" dist/RapydShare.exe --clobber --repo "$GITHUB_REPOSITORY"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
+          if grep -q "ADD-AFTER-WINDOWS-BUILD" notes.md; then
+            sed -i "s/ADD-AFTER-WINDOWS-BUILD/$hash/" notes.md
+            gh release edit "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          fi
+          echo "RapydShare.exe SHA256: \`$hash\`" >> "$GITHUB_STEP_SUMMARY"

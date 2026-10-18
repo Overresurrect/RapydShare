@@ -236,6 +236,8 @@ The output lands in `dist/`:
 
 The script also prints a SHA-256 hash for the file.
 
+**Windows build on GitHub:** you don't need a Windows PC. Create the release (a draft is fine) with its tag, then run the **Release build** workflow from the Actions tab with that tag. It builds `RapydShare.exe` from the commit the release points at, attaches it, and fills in its checksum if the release notes contain `ADD-AFTER-WINDOWS-BUILD`.
+
 **Version number:** update `version_info.txt` (`filevers`, `prodvers`, `FileVersion`, and `ProductVersion`). `build.py` reads `ProductVersion` for the macOS app as well.
 
 **macOS Python:** build with a Python from [python.org](https://www.python.org/downloads/macos/) or `uv python install`, not Homebrew's or pyenv's. Those are built for your exact macOS version, so the app won't open on older Macs. `build.py` warns you if this happens.
