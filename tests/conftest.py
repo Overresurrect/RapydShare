@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -48,3 +50,14 @@ def share(tmp_path, monkeypatch):
 @pytest.fixture
 def client(share):
     return TestClient(app)
+
+
+@pytest.fixture
+def link_out(share):
+    """A symlink inside the shared folder that points at a folder outside it."""
+    link = share / "link"
+    try:
+        os.symlink(share.parent / "shared-private", link, target_is_directory=True)
+    except OSError:
+        pytest.skip("Can't create symlinks here (Windows without Developer Mode)")
+    return link

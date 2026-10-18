@@ -1,9 +1,12 @@
+import stat
 import sys
 from pathlib import Path, PureWindowsPath
 
 from fastapi import HTTPException
 
 from src.config import config
+
+HIDDEN_NAMES = {"desktop.ini", "thumbs.db", "$recycle.bin", "system volume information"}
 
 
 def path_text_is_safe(path: str) -> bool:
@@ -26,12 +29,48 @@ def _is_alias(path: str) -> bool:
     return False
 
 
+def is_hidden_name(name: str) -> bool:
+    return name.startswith(".") or name.lower() in HIDDEN_NAMES
+
+
+def is_hidden(path: Path) -> bool:
+    """True for hidden names and for entries with the OS hidden flag. The flag is read off the entry itself, not a link's target."""
+    if is_hidden_name(path.name):
+        return True
+    try:
+        st = path.lstat()
+    except OSError:
+        return True
+    if sys.platform == "darwin":
+        return bool(st.st_flags & stat.UF_HIDDEN)
+    if sys.platform == "win32":
+        return bool(st.st_file_attributes & (stat.FILE_ATTRIBUTE_HIDDEN | stat.FILE_ATTRIBUTE_SYSTEM))
+    return False
+
+
+def resolves_inside(path: Path, root: Path) -> bool:
+    """root must already be resolved."""
+    try:
+        return path.resolve().is_relative_to(root)
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
+def _names_hidden(path: str) -> bool:
+    return any(p not in (".", "..") and is_hidden_name(p) for p in PureWindowsPath(path).parts)
+
+
+def _hidden_below(path: Path, root: Path) -> bool:
+    parts = path.relative_to(root).parts
+    return any(is_hidden(root.joinpath(*parts[:i + 1])) for i in range(len(parts)))
+
+
 def resolve_in_root(path: str) -> Path:
     if not config.ROOT_DIR:
         raise HTTPException(503)
     if not path_text_is_safe(path):
         raise HTTPException(403)
-    if _is_alias(path):
+    if _is_alias(path) or _names_hidden(path):
         raise HTTPException(404)
     try:
         root = Path(config.ROOT_DIR).resolve()
@@ -39,6 +78,8 @@ def resolve_in_root(path: str) -> Path:
         if not real_path.is_relative_to(root):
             raise HTTPException(403)
         real_path.stat()
+        if _hidden_below(real_path, root):
+            raise HTTPException(404)
     except (OSError, ValueError, RuntimeError):
         raise HTTPException(404)
     return real_path

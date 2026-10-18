@@ -100,17 +100,6 @@ def test_folder_endpoints_refuse_absolute_paths(client, share, endpoint):
     assert client.get(f"/api/{endpoint}", params={"path": path}).status_code == 403
 
 
-@pytest.fixture
-def link_out(share):
-    """A symlink inside the shared folder that points at a folder outside it."""
-    link = share / "link"
-    try:
-        os.symlink(share.parent / "shared-private", link, target_is_directory=True)
-    except OSError:
-        pytest.skip("Can't create symlinks here (Windows without Developer Mode)")
-    return link
-
-
 @pytest.mark.parametrize("endpoint", FILE_ENDPOINTS)
 def test_file_endpoints_refuse_symlinks_out(client, link_out, endpoint):
     assert client.get(f"/api/{endpoint}", params={"path": "link/secret.png"}).status_code == 403
