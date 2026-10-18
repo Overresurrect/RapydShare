@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from src.config import config
+from src.paths import resolve_in_root
 from src.utils import generate_thumbnail
 
 executor = ThreadPoolExecutor(max_workers=4)
@@ -68,12 +69,6 @@ def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
     if not is_correct:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid creds", {"WWW-Authenticate": "Basic"})
     return credentials.username
-
-def resolve_in_root(path: str) -> Path:
-    root = Path(config.ROOT_DIR).resolve()
-    real_path = (root / path).resolve()
-    if not real_path.is_relative_to(root): raise HTTPException(403)
-    return real_path
 
 @app.get("/api/files", dependencies=[Depends(get_current_username)])
 async def list_files(path: str = ""):

@@ -1,8 +1,13 @@
 import io
 import os
+import sys
 import zipfile
 
 import pytest
+from fastapi.testclient import TestClient
+
+from src.config import config
+from src.server import app
 
 FILE_ENDPOINTS = ["download", "view", "thumb"]
 FOLDER_ENDPOINTS = ["files", "download_folder"]
@@ -114,3 +119,54 @@ def test_file_endpoints_refuse_symlinks_out(client, link_out, endpoint):
 @pytest.mark.parametrize("endpoint", FOLDER_ENDPOINTS)
 def test_folder_endpoints_refuse_symlinks_out(client, link_out, endpoint):
     assert client.get(f"/api/{endpoint}", params={"path": "link"}).status_code == 403
+
+
+# --- Odd and platform-specific inputs ---
+
+ALL_ENDPOINTS = FILE_ENDPOINTS + FOLDER_ENDPOINTS
+
+
+@pytest.mark.parametrize("endpoint", ALL_ENDPOINTS)
+def test_no_shared_folder_is_503(client, monkeypatch, endpoint):
+    monkeypatch.setattr(config, "ROOT_DIR", "")
+    assert client.get(f"/api/{endpoint}", params={"path": ""}).status_code == 503
+
+
+@pytest.mark.parametrize("endpoint", ALL_ENDPOINTS)
+@pytest.mark.parametrize("path", ["//host/x", "\\\\host\\x", "C:x", "C:\\x", "a\x00b", "hello.txt:x"])
+def test_unsafe_text_is_403(client, endpoint, path):
+    assert client.get(f"/api/{endpoint}", params={"path": path}).status_code == 403
+
+
+@pytest.fixture
+def lenient_client(share):
+    return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.mark.parametrize("endpoint", ALL_ENDPOINTS)
+@pytest.mark.parametrize("path", ["x" * 1000, "docs/" + "x" * 300 + "/y", "hello.txt/x"],
+                         ids=["long-path", "long-name", "file-as-folder"])
+def test_odd_paths_are_a_generic_404(lenient_client, endpoint, path):
+    r = lenient_client.get(f"/api/{endpoint}", params={"path": path})
+    assert r.status_code == 404
+    assert r.json() == {"detail": "Not Found"}
+
+
+def test_symlink_loop_is_a_generic_404(lenient_client, share):
+    try:
+        os.symlink(share / "loop", share / "loop")
+    except OSError:
+        pytest.skip("Can't create symlinks here (Windows without Developer Mode)")
+    assert lenient_client.get("/api/view", params={"path": "loop"}).status_code == 404
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows strips trailing dots and spaces")
+@pytest.mark.parametrize("path", ["hello.txt.", "hello.txt ", "docs./notes.txt", "docs /notes.txt"])
+def test_windows_aliases_are_404(client, path):
+    assert client.get("/api/view", params={"path": path}).status_code == 404
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS named forks")
+def test_named_forks_are_404(client, share):
+    (share / "hello.txt" / "..namedfork" / "rsrc").write_bytes(b"fork")
+    assert client.get("/api/view", params={"path": "hello.txt/..namedfork/rsrc"}).status_code == 404
