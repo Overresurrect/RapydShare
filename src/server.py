@@ -4,16 +4,13 @@ import errno
 import logging
 import uvicorn
 import mimetypes
-import shutil
 import asyncio
-import uuid
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.background import BackgroundTask
 from starlette.convertors import Convertor, register_url_convertor
 from starlette.requests import ClientDisconnect
 
@@ -23,6 +20,7 @@ from src.middleware import BrowserProtection
 from src.paths import is_listable, resolve_in_root
 from src.uploads import declared_length, has_room, sanitize_filename, save_upload
 from src.utils import generate_thumbnail
+from src.zipstream import zip_stream
 
 log = logging.getLogger(__name__)
 executor = ThreadPoolExecutor(max_workers=4)
@@ -137,14 +135,18 @@ async def download_file(path: str):
 async def download_folder(path: str):
     real_path = resolve_in_root(path)
     if not real_path.is_dir(): raise HTTPException(400)
-    temp_zip = config.THUMB_CACHE_DIR / f"dl_{uuid.uuid4().hex}.zip"
-    loop = asyncio.get_event_loop()
-    try:
-        await loop.run_in_executor(executor, shutil.make_archive, str(temp_zip).replace('.zip',''), 'zip', real_path)
-    except Exception:
-        temp_zip.unlink(missing_ok=True)
-        raise
-    return FileResponse(temp_zip, filename=f"{real_path.name}.zip", background=BackgroundTask(temp_zip.unlink))
+    root = Path(config.ROOT_DIR).resolve()
+    skip = config.THUMB_CACHE_DIR.resolve() if config.THUMB_CACHE_DIR else None
+    chunks = zip_stream(real_path, root, skip)
+    if chunks is None: raise HTTPException(503, headers={"Retry-After": "5"})
+    # A sync iterator runs in Starlette's threadpool, apart from the thumbnail executor
+    return StreamingResponse(chunks, media_type="application/zip",
+                             headers={"Content-Disposition": attachment(f"{real_path.name}.zip")})
+
+def attachment(filename: str) -> str:
+    """Content-Disposition in the same form as FileResponse's."""
+    quoted = quote(filename)
+    return f"attachment; filename*=utf-8''{quoted}" if quoted != filename else f'attachment; filename="{filename}"'
 
 def renders_inline(mime: str | None) -> bool:
     """Images except SVG, video, audio, PDF and plain text. Anything else could run script."""
