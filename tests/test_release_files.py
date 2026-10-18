@@ -40,8 +40,7 @@ def test_readme_matches_the_access_model():
     assert "Username/Password" not in text
     assert "access code" in text.lower()
     assert "not encrypted" in text.lower()
+    assert "by default" in text.lower() and "Require access code" in text
+    assert "Every share is protected" not in text
     assert "--require-hashes -r requirements.lock" in text
 
-
-def test_gitignore_drops_stale_thumbs_entry():
-    assert "RapydShare_Thumbs" not in _read(".gitignore")

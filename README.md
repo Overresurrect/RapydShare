@@ -15,7 +15,7 @@ A modern, fast local file transfer tool.
 - **Modern UI:** Clean, responsive Windows 11 style interface (PyQt6 + Fluent Widgets).
 - **Web Client:** Responsive React + TypeScript web interface for mobile and desktop clients.
 - **Rich Previews:** Built-in image, video, and PDF previews.
-- **Access Code:** Every share is protected by an access code. It is shown in the app, carried in the QR code and link, and typed into the code boxes if you open the address by hand.
+- **Access Code:** Shares are protected by an access code by default. It is shown in the app, carried in the QR code and link, and typed into the code boxes if you open the address by hand. You can turn it off with the **Require access code** switch, but then anyone on the network can open the share, and the app shows a warning.
 - **Safe Defaults:** Hidden and system files are never shared, and uploads are off until you turn them on.
 - **Windows & macOS:** Desktop app for both, powered by Python (FastAPI) and React.
 
