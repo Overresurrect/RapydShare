@@ -236,7 +236,11 @@ async def upload_file(file: UploadFile = File(...)):
 @app.get("/{code:access_code}", include_in_schema=False)
 async def enter_with_code(code: str, request: Request):
     if not access.require_code: return RedirectResponse("/", 303)
-    return start_session(request, code, RedirectResponse("/", 303))
+    try:
+        return start_session(request, code, RedirectResponse("/", 303))
+    except HTTPException:
+        # Wrong code or a wait (still counted): send an old QR code to the code screen rather than JSON
+        return RedirectResponse("/", 303)
 
 if os.path.exists(config.FRONTEND_DIST_DIR):
     app.mount("/", StaticFiles(directory=config.FRONTEND_DIST_DIR, html=True), name="static")

@@ -89,18 +89,29 @@ def test_code_url_ignores_case_and_dash(client, code_on, shape):
     assert files_status(client) == 200
 
 
-def test_wrong_code_url_is_refused(client, code_on):
-    r = client.get(f"/{wrong_code(code_on)}", follow_redirects=False)
-    assert r.status_code == 401
-    assert r.json() == {"detail": "wrong_code"}
+def assert_sent_to_code_screen(r):
+    assert r.status_code == 303
+    assert r.headers["location"] == "/"
     assert "set-cookie" not in r.headers
+
+
+def test_wrong_code_url_goes_to_the_code_screen(client, code_on):
+    # An old QR code lands on the code-entry screen, not raw JSON
+    assert_sent_to_code_screen(client.get(f"/{wrong_code(code_on)}", follow_redirects=False))
+    assert files_status(client) == 401
+
+
+def test_code_url_during_a_wait_goes_to_the_code_screen(client, code_on):
+    for _ in range(5):
+        login(client, wrong_code(code_on))
+    assert_sent_to_code_screen(client.get(f"/{code_on}", follow_redirects=False))
     assert files_status(client) == 401
 
 
 def test_wrong_code_urls_count_toward_the_limit(client, code_on):
     for _ in range(5):
-        assert client.get(f"/{wrong_code(code_on)}").status_code == 401
-    r = client.get(f"/{code_on}", follow_redirects=False)
+        assert_sent_to_code_screen(client.get(f"/{wrong_code(code_on)}", follow_redirects=False))
+    r = login(client, code_on)
     assert r.status_code == 429
     assert r.headers["retry-after"] == "2"
 
@@ -180,7 +191,7 @@ def test_login_waits_after_five_wrong_codes(client, code_on):
 
 def test_login_and_code_url_share_the_count(client, code_on):
     for _ in range(3):
-        client.get(f"/{wrong_code(code_on)}")
+        client.get(f"/{wrong_code(code_on)}", follow_redirects=False)
     for _ in range(2):
         login(client, wrong_code(code_on))
     assert login(client, code_on).status_code == 429
