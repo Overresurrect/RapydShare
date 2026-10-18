@@ -58,7 +58,7 @@ Requires a Mac with Apple Silicon (M1 or newer) running macOS 14 Sonoma or later
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.12+ (release builds from `requirements.lock` use Python 3.12, which is what the lock is resolved for)
 - Node.js & npm
 
 > **macOS:** use a Python from [python.org](https://www.python.org/downloads/macos/) or `uv python install`, not Homebrew's or pyenv's. Those are built for your exact macOS version, so an app built with them won't open on older Macs. `build.py` warns you if this happens.
