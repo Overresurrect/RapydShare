@@ -127,6 +127,8 @@ def _refuse_share_folder(folder: str) -> str | None:
         return "That's your whole home folder. Choose a folder inside it."
     if path == _system_root().resolve():
         return "That's the whole system drive. Choose a smaller folder."
+    if home.is_relative_to(path):
+        return "That folder contains your home folder. Choose a folder inside it."
     inside_home = path.is_relative_to(home)
     if not inside_home and any(_is_or_inside(path, f.resolve()) for f in _os_folders()):
         return "That's a system folder. Choose a different one."

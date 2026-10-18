@@ -112,3 +112,42 @@ def test_a_path_inside_an_unreadable_folder_is_refused_not_raised(home):
     finally:
         locked.chmod(0o700)
     assert message and str(locked) not in message
+
+
+@pytest.fixture
+def no_os_folders(monkeypatch):
+    """The fake home lives under the temp dir, which can itself sit inside an OS folder (/private/var on macOS)."""
+    monkeypatch.setattr("src.paths._os_folders", lambda: [])
+
+
+def test_the_parent_of_home_is_refused(home, no_os_folders):
+    assert refuse_share_folder(str(home.parent)) is not None
+
+
+def test_a_folder_further_above_home_is_refused(home, no_os_folders):
+    assert refuse_share_folder(str(home.parent.parent)) is not None
+
+
+def test_the_parent_of_home_is_refused_when_reached_through_a_symlink(home, no_os_folders, tmp_path):
+    link = tmp_path / "parent-link"
+    try:
+        os.symlink(home.parent, link, target_is_directory=True)
+    except OSError:
+        pytest.skip("Can't create symlinks here (Windows without Developer Mode)")
+    assert refuse_share_folder(str(link)) is not None
+
+
+def test_the_message_for_a_folder_holding_home_names_no_path(home, no_os_folders):
+    message = refuse_share_folder(str(home.parent))
+    assert message and str(home.parent) not in message
+
+
+def test_a_sibling_of_home_is_allowed(home, no_os_folders):
+    sibling = home.parent / "Shared"
+    sibling.mkdir()
+    assert refuse_share_folder(str(sibling)) is None
+
+
+def test_a_subfolder_of_home_is_still_allowed_when_its_parent_is_refused(home, no_os_folders):
+    (home / "Photos" / "2026").mkdir(parents=True)
+    assert refuse_share_folder(str(home / "Photos" / "2026")) is None
