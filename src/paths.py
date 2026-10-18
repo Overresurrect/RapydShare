@@ -109,9 +109,16 @@ def _is_or_inside(path: Path, folder: Path) -> bool:
 
 
 def refuse_share_folder(folder: str) -> str | None:
-    """Why folder can't be shared, in words for the user, or None if it can."""
+    """Why folder can't be shared, in words for the user, or None if it can. Never raises."""
     if not folder.strip():
         return "Choose a folder to share."
+    try:
+        return _refuse_share_folder(folder)
+    except (OSError, ValueError, RuntimeError):
+        return "That folder can't be opened."
+
+
+def _refuse_share_folder(folder: str) -> str | None:
     path = Path(folder.strip()).resolve()
     if not path.is_dir():
         return "That folder doesn't exist."

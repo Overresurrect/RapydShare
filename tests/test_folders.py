@@ -94,3 +94,21 @@ def test_a_folder_with_the_os_hidden_flag_is_refused(home):
 
 def test_the_message_names_no_path(home):
     assert str(home) not in refuse_share_folder(str(home))
+
+
+def test_a_path_with_a_nul_character_is_refused_not_raised(home):
+    message = refuse_share_folder(str(home / "Photos") + "\x00x")
+    assert message and "\x00" not in message
+
+
+@pytest.mark.skipif(sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                    reason="needs POSIX permissions and a non-root user")
+def test_a_path_inside_an_unreadable_folder_is_refused_not_raised(home):
+    locked = home / "locked"
+    (locked / "inner").mkdir(parents=True)
+    locked.chmod(0)
+    try:
+        message = refuse_share_folder(str(locked / "inner"))
+    finally:
+        locked.chmod(0o700)
+    assert message and str(locked) not in message
