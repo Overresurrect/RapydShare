@@ -16,7 +16,7 @@ A modern, fast, and secure local file transfer tool.
 - **Web Client:** Responsive React + TypeScript web interface for mobile and desktop clients.
 - **Rich Previews:** Built-in image, video, and PDF previews.
 - **Security:** Optional authentication (Username/Password) to restrict access.
-- **Cross-Platform Core:** Powered by Python (FastAPI) and React.
+- **Windows & macOS:** Desktop app for both, powered by Python (FastAPI) and React.
 
 ## 🛠️ Tech Stack
 
@@ -27,11 +27,29 @@ A modern, fast, and secure local file transfer tool.
 
 ## 📦 Installation & Usage (For Users)
 
-1. Download the latest `RapydShare.exe` from the [Releases Page](https://github.com/Overresurrect/RapydShare/releases).
-2. Run the application.
-3. Select a folder to share and click **Start Server**.
-4. (Optional) Flip on **Allow Uploads** and pick an upload folder if you want clients to be able to send files to you.
-5. Open the URL shown in the tool on your client device (iPhone, Android, laptop, etc.), including the port number — or scan the QR code.
+### Windows
+
+Download the latest `RapydShare.exe` from the [Releases Page](https://github.com/Overresurrect/RapydShare/releases) and run it.
+
+### macOS
+
+Requires a Mac with Apple Silicon (M1 or newer) running macOS 14 Sonoma or later.
+
+1. Download the latest `RapydShare-mac-arm64.dmg` from the [Releases Page](https://github.com/Overresurrect/RapydShare/releases).
+2. Open it and drag **RapydShare** into your **Applications** folder.
+3. Open RapydShare. The app isn't signed with an Apple Developer certificate, so macOS blocks it the first time:
+   1. Click **Done** on the warning.
+   2. Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to the RapydShare message.
+   3. Confirm with **Open Anyway**. You only need to do this once.
+
+   Comfortable with the terminal? `xattr -dr com.apple.quarantine /Applications/RapydShare.app` does the same thing.
+4. If macOS asks whether RapydShare can accept incoming network connections or find devices on your local network, click **Allow** — other devices can't connect otherwise.
+
+### Sharing Files
+
+1. Select a folder to share and click **Start Server**.
+2. (Optional) Flip on **Allow Uploads** and pick an upload folder if you want clients to be able to send files to you.
+3. Open the URL shown in the tool on your client device (iPhone, Android, laptop, etc.), including the port number — or scan the QR code.
 
 ## 💻 Development Setup (For Contributors)
 
@@ -39,6 +57,8 @@ A modern, fast, and secure local file transfer tool.
 
 - Python 3.10+
 - Node.js & npm
+
+> **macOS:** use a Python from [python.org](https://www.python.org/downloads/macos/) or `uv python install`, not Homebrew's or pyenv's. Those are built for your exact macOS version, so an app built with them won't open on older Macs. `build.py` warns you if this happens.
 
 ### 1. Clone the Repository
 
@@ -78,7 +98,7 @@ cd frontend
 npm run dev
 ```
 
-### 5. Building the Executable
+### 5. Building the App
 
 ```bash
 # Build the React frontend first
@@ -90,7 +110,12 @@ cd ..
 python build.py
 ```
 
-The resulting `RapydShare.exe` will be in the `dist/` folder.
+Run the build on the platform you're building for. The results land in the `dist/` folder:
+
+- **Windows:** `RapydShare.exe`
+- **macOS:** `RapydShare.app`, plus `RapydShare-mac-arm64.dmg` ready to upload to a release. The script also prints the minimum macOS version the app supports.
+
+The macOS icon (`assets/RapydShare.icns`) is generated from the Windows icon by `python make_mac_icon.py`. Pass a larger transparent PNG (e.g. `python make_mac_icon.py artwork.png`) for a sharper icon.
 
 ## 📄 License
 

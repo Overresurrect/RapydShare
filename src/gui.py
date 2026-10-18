@@ -20,6 +20,14 @@ from src.server import run_server, stop_server_logic
 # Import our new QR code generator and the existing IP function
 from src.utils import get_local_ip, generate_qr_code_pixmap
 
+# A macOS .app starts with "/" as its working directory, so default to the home folder there
+DEFAULT_DIR = os.getcwd() if sys.platform == "win32" else os.path.expanduser("~")
+
+def ui_font(size, weight):
+    # Segoe UI only exists on Windows; elsewhere use the system font
+    family = "Segoe UI" if sys.platform == "win32" else QApplication.font().family()
+    return QFont(family, size, weight)
+
 class ServerLauncher(QWidget):
     def __init__(self):
         super().__init__()
@@ -91,7 +99,7 @@ class ServerLauncher(QWidget):
 
         # --- HEADING SECTION ---
         self.title_label = SubtitleLabel("Server Configuration", self)
-        self.title_label.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+        self.title_label.setFont(ui_font(20, QFont.Weight.Bold))
         self.v_layout.addWidget(self.title_label)
         self.v_layout.addSpacing(5)
 
@@ -102,7 +110,7 @@ class ServerLauncher(QWidget):
         h_folder = QHBoxLayout()
         h_folder.setSpacing(8)
         self.folder_input = LineEdit(self)
-        self.folder_input.setText(os.getcwd())
+        self.folder_input.setText(DEFAULT_DIR)
         self.folder_input.setFixedHeight(35)
         self.btn_browse = PushButton("Select", self)
         self.btn_browse.setFixedWidth(75)
@@ -194,7 +202,7 @@ class ServerLauncher(QWidget):
         h_btn_layout.addStretch()
         self.btn_toggle = PushButton("Start Server", self)
         self.btn_toggle.setFixedSize(195, 52)
-        self.btn_toggle.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        self.btn_toggle.setFont(ui_font(12, QFont.Weight.Bold))
         self.btn_toggle.clicked.connect(self.toggle_server_state)
         h_btn_layout.addWidget(self.btn_toggle)
         h_btn_layout.addStretch()
@@ -243,7 +251,7 @@ class ServerLauncher(QWidget):
         self.btn_browse_upload.setEnabled(checked)
 
     def browse_upload_folder(self):
-        start_dir = self.upload_folder_input.text() or self.folder_input.text() or os.getcwd()
+        start_dir = self.upload_folder_input.text() or self.folder_input.text() or DEFAULT_DIR
         folder = QFileDialog.getExistingDirectory(self, "Select Upload Folder", start_dir)
         if folder:
             self.upload_folder_input.setText(folder)
