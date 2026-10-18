@@ -5,14 +5,15 @@ import secrets
 import mimetypes
 import shutil
 import asyncio
+import uuid
 import aiofiles
-from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, Depends, status, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 from src.config import config
 from src.utils import generate_thumbnail
@@ -123,10 +124,14 @@ async def download_file(path: str):
 async def download_folder(path: str):
     real_path = resolve_in_root(path)
     if not real_path.is_dir(): raise HTTPException(400)
-    temp_zip = config.THUMB_CACHE_DIR / f"dl_{int(datetime.now().timestamp())}.zip"
+    temp_zip = config.THUMB_CACHE_DIR / f"dl_{uuid.uuid4().hex}.zip"
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(executor, shutil.make_archive, str(temp_zip).replace('.zip',''), 'zip', real_path)
-    return FileResponse(temp_zip, filename=f"{real_path.name}.zip")
+    try:
+        await loop.run_in_executor(executor, shutil.make_archive, str(temp_zip).replace('.zip',''), 'zip', real_path)
+    except Exception:
+        temp_zip.unlink(missing_ok=True)
+        raise
+    return FileResponse(temp_zip, filename=f"{real_path.name}.zip", background=BackgroundTask(temp_zip.unlink))
 
 @app.get("/api/view", dependencies=[Depends(get_current_username)])
 async def view_media(path: str):
