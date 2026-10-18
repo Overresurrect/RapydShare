@@ -164,3 +164,36 @@ def test_upload_file_system_work_runs_off_the_event_loop(client, share, monkeypa
 
     assert r.status_code == 200
     assert on_loop == {"has_room": False, "_move_into_place": False, "mark_downloaded": False}
+
+
+# --- Starting twice, and failing to start ---
+
+def test_starting_while_a_server_is_running_is_refused_and_closes_the_socket(running):
+    extra = open_listen_socket(0, host="127.0.0.1")
+    with pytest.raises(RuntimeError):
+        start_server(extra)
+    assert extra.fileno() == -1
+
+
+def test_starting_while_a_stopped_server_has_not_ended_is_refused(share, monkeypatch):
+    class Lingering:
+        def is_alive(self):
+            return True
+
+    monkeypatch.setattr("src.server._last_thread", Lingering())
+    extra = open_listen_socket(0, host="127.0.0.1")
+    with pytest.raises(RuntimeError):
+        start_server(extra)
+    assert extra.fileno() == -1
+
+
+def test_a_failure_making_the_cache_folder_closes_the_socket(share, monkeypatch):
+    def fail():
+        raise OSError("disk full")
+
+    monkeypatch.setattr("src.server.open_cache_dir", fail)
+    sock = open_listen_socket(0, host="127.0.0.1")
+    with pytest.raises(OSError):
+        start_server(sock)
+    assert sock.fileno() == -1
+    assert not server_started()

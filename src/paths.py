@@ -1,3 +1,4 @@
+import os
 import stat
 import sys
 from pathlib import Path, PureWindowsPath
@@ -90,3 +91,38 @@ def resolve_in_root(path: str) -> Path:
     except (OSError, ValueError, RuntimeError):
         raise HTTPException(404)
     return real_path
+
+
+def _os_folders() -> list[Path]:
+    if sys.platform == "win32":
+        names = ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData")
+        return [Path(os.environ[n]) for n in names if n in os.environ]
+    return [Path(p) for p in ("/System", "/Library", "/Applications", "/usr", "/bin", "/sbin", "/etc", "/private", "/var")]
+
+
+def _system_root() -> Path:
+    return Path(os.environ.get("SystemDrive", "C:") + "\\") if sys.platform == "win32" else Path("/")
+
+
+def _is_or_inside(path: Path, folder: Path) -> bool:
+    return path == folder or path.is_relative_to(folder)
+
+
+def refuse_share_folder(folder: str) -> str | None:
+    """Why folder can't be shared, in words for the user, or None if it can."""
+    if not folder.strip():
+        return "Choose a folder to share."
+    path = Path(folder.strip()).resolve()
+    if not path.is_dir():
+        return "That folder doesn't exist."
+    home = Path.home().resolve()
+    if path == home:
+        return "That's your whole home folder. Choose a folder inside it."
+    if path == _system_root().resolve():
+        return "That's the whole system drive. Choose a smaller folder."
+    inside_home = path.is_relative_to(home)
+    if not inside_home and any(_is_or_inside(path, f.resolve()) for f in _os_folders()):
+        return "That's a system folder. Choose a different one."
+    if is_hidden(path) or (inside_home and hidden_below(path, home)):
+        return "That folder is hidden. Choose a different one."
+    return None

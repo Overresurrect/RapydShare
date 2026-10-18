@@ -38,6 +38,8 @@ MAX_OPEN_FILES = 10240
 
 # The running server, its thread and its socket
 _running: tuple[uvicorn.Server, threading.Thread, socket.socket] | None = None
+# The newest server thread, kept after stop_server so a late-ending one still blocks a new start
+_last_thread: threading.Thread | None = None
 
 class CodeConvertor(Convertor):
     """Matches one path segment that is the access code, in any case and with any dashes."""
@@ -261,9 +263,18 @@ def raise_file_limit():
         log.warning("Couldn't raise the open file limit", exc_info=True)
 
 def start_server(sock: socket.socket) -> threading.Thread:
-    """Serves the app on sock, from open_listen_socket, in a new thread. server_started() says when it's up."""
-    global _running
-    open_cache_dir()
+    """Serves the app on sock, from open_listen_socket, in a new thread. server_started() says when it's up.
+
+    Raises RuntimeError if an earlier server's thread hasn't ended, or OSError if the cache folder can't be made. sock is closed then.
+    """
+    global _running, _last_thread
+    try:
+        if _last_thread is not None and _last_thread.is_alive():
+            raise RuntimeError("The earlier server is still shutting down.")
+        open_cache_dir()
+    except Exception:
+        sock.close()
+        raise
     raise_file_limit()
     log_config = uvicorn.config.LOGGING_CONFIG
     log_config["handlers"]["default"]["stream"] = "ext://sys.stderr"
@@ -273,6 +284,7 @@ def start_server(sock: socket.socket) -> threading.Thread:
                                            timeout_keep_alive=5, timeout_graceful_shutdown=1))
     thread = threading.Thread(target=server.run, args=([sock],), daemon=True)
     _running = (server, thread, sock)
+    _last_thread = thread
     thread.start()
     return thread
 
