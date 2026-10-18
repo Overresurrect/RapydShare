@@ -1,7 +1,6 @@
 import sys
 import os
-import threading
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QTimer
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QFileDialog, QApplication, QFrame, QLabel
 )
@@ -17,7 +16,7 @@ from qfluentwidgets import (
 
 from src.access import access
 from src.config import config
-from src.server import run_server, stop_server_logic
+from src import server
 # Import our new QR code generator and the existing IP function
 from src.utils import get_local_ip, generate_qr_code_pixmap
 
@@ -266,9 +265,9 @@ class ServerLauncher(QWidget):
     def start_server(self):
         config.ROOT_DIR = self.folder_input.text()
         try:
-            config.PORT = int(self.port_input.text())
-        except ValueError:
-            self.show_info("Error", "Port must be a number.")
+            config.PORT = server.parse_port(self.port_input.text())
+        except ValueError as e:
+            self.show_info("Error", str(e))
             return
 
         config.ALLOW_UPLOAD = self.switch_upload.isChecked()
@@ -293,16 +292,35 @@ class ServerLauncher(QWidget):
             self.show_info("Error", "Selected folder does not exist.")
             return
 
+        try:
+            sock = server.open_listen_socket(config.PORT)
+        except OSError as e:
+            self.show_info("Error", f"Couldn't use port {config.PORT}: {e.strerror or e}")
+            return
+
         self.set_inputs_enabled(False)
         self.folder_input.setReadOnly(True)
 
         code = access.start(config.REQUIRE_CODE)
-        self.server_thread = threading.Thread(target=run_server, daemon=True)
-        self.server_thread.start()
+        self.server_thread = server.start_server(sock)
 
         self.is_running = True
         self.apply_button_style(started=True)
+        self.status_label.setText("Starting...")
+        self.wait_until_started(self.server_thread, code)
 
+    def wait_until_started(self, thread, code):
+        """Shows the address once uvicorn has started, or stops if its thread ended first."""
+        if thread is not self.server_thread: return
+        if server.server_started():
+            self.show_online(code)
+        elif thread.is_alive():
+            QTimer.singleShot(50, lambda: self.wait_until_started(thread, code))
+        else:
+            self.stop_server()
+            self.show_info("Error", "The server couldn't start.")
+
+    def show_online(self, code):
         ip = get_local_ip()
         link = f"http://{ip}:{config.PORT}" + (f"/{code}" if code else "")
         self.status_label.setText(f"Running at: {link}")
@@ -320,8 +338,8 @@ class ServerLauncher(QWidget):
         self.show_success("Online", f"Server running. Copied link to clipboard.")
 
     def stop_server(self):
-        stop_server_logic()
-        access.stop()
+        stopped = server.stop_server()
+        self.server_thread = None
 
         self.is_running = False
         self.apply_button_style(started=False)
@@ -334,7 +352,7 @@ class ServerLauncher(QWidget):
         self.qr_code_label.setPixmap(QPixmap())
         self.url_label.setText("Ready to start")
         
-        self.show_info("Offline", "Server has been stopped.")
+        self.show_info("Offline", "Server has been stopped." if stopped else "Server is still shutting down.")
 
     def set_inputs_enabled(self, enable):
         self.btn_browse.setEnabled(enable)

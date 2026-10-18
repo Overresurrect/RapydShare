@@ -1,10 +1,12 @@
 import os
+import sys
 import json
 import errno
+import socket
 import logging
+import threading
 import uvicorn
 import mimetypes
-import asyncio
 import shutil
 import tempfile
 from pathlib import Path
@@ -13,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from starlette.convertors import Convertor, register_url_convertor
 from starlette.requests import ClientDisconnect
 
@@ -31,9 +34,10 @@ app.add_middleware(BrowserProtection)
 
 MAX_LOGIN_BODY = 1024
 VIEW_SANDBOX = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'"
+MAX_OPEN_FILES = 10240
 
-# Global variable to hold the server instance
-global_server = None
+# The running server, its thread and its socket
+_running: tuple[uvicorn.Server, threading.Thread, socket.socket] | None = None
 
 class CodeConvertor(Convertor):
     """Matches one path segment that is the access code, in any case and with any dashes."""
@@ -83,8 +87,9 @@ async def logout(request: Request):
     response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, samesite="strict")
     return response
 
+# The file endpoints are plain def, so Starlette runs them, and their file-system work, off the event loop
 @app.get("/api/files", dependencies=[Depends(require_session)])
-async def list_files(path: str = ""):
+def list_files(path: str = ""):
     req_path = resolve_in_root(path)
     if not req_path.is_dir(): raise HTTPException(404)
     root = Path(config.ROOT_DIR).resolve()
@@ -114,23 +119,22 @@ async def list_files(path: str = ""):
     return items
 
 @app.get("/api/thumb", dependencies=[Depends(require_session)])
-async def get_thumb(path: str):
+def get_thumb(path: str):
     real_path = resolve_in_root(path)
     cache_dir = config.THUMB_CACHE_DIR
     if cache_dir is None: raise HTTPException(404)
-    loop = asyncio.get_running_loop()
-    thumb = await loop.run_in_executor(executor, thumb_for, real_path, cache_dir)
+    thumb = executor.submit(thumb_for, real_path, cache_dir).result()
     if thumb is None: raise HTTPException(404)
     return FileResponse(thumb)
 
 @app.get("/api/download", dependencies=[Depends(require_session)])
-async def download_file(path: str):
+def download_file(path: str):
     real_path = resolve_in_root(path)
     if real_path.is_file(): return FileResponse(real_path, filename=real_path.name)
     raise HTTPException(404)
 
 @app.get("/api/download_folder", dependencies=[Depends(require_session)])
-async def download_folder(path: str):
+def download_folder(path: str):
     real_path = resolve_in_root(path)
     if not real_path.is_dir(): raise HTTPException(400)
     root = Path(config.ROOT_DIR).resolve()
@@ -164,7 +168,7 @@ def renders_inline(mime: str | None) -> bool:
     return mime.startswith(("video/", "audio/")) or mime in ("application/pdf", "text/plain")
 
 @app.get("/api/view", dependencies=[Depends(require_session)])
-async def view_media(path: str):
+def view_media(path: str):
     real_path = resolve_in_root(path)
     if not real_path.is_file(): raise HTTPException(404)
     mime, _ = mimetypes.guess_type(real_path.name)
@@ -181,10 +185,10 @@ async def server_info():
 async def upload_file(request: Request):
     # No body parameters, so nothing is read or spooled to disk before these checks
     if not config.ALLOW_UPLOAD: raise HTTPException(403)
-    if not config.UPLOAD_DIR or not os.path.isdir(config.UPLOAD_DIR): raise HTTPException(503)
+    if not config.UPLOAD_DIR or not await run_in_threadpool(os.path.isdir, config.UPLOAD_DIR): raise HTTPException(503)
     length = declared_length(request.headers.get("content-length"))
-    upload_dir = Path(config.UPLOAD_DIR).resolve()
-    if not has_room(upload_dir, length): raise HTTPException(507)
+    upload_dir = await run_in_threadpool(Path(config.UPLOAD_DIR).resolve)
+    if not await run_in_threadpool(has_room, upload_dir, length): raise HTTPException(507)
 
     name = sanitize_filename(unquote(request.headers.get("x-file-name", "")))
     try:
@@ -195,19 +199,20 @@ async def upload_file(request: Request):
         log.exception("Upload failed")
         raise HTTPException(507 if e.errno == errno.ENOSPC else 500)
 
-    try:
-        rel_path = str(target_path.resolve().relative_to(Path(config.ROOT_DIR).resolve())).replace("\\", "/")
-        saved_outside_root = False
-    except ValueError:
-        rel_path = None
-        saved_outside_root = True
-
+    rel_path = await run_in_threadpool(path_in_share, target_path)
     return JSONResponse({
         "name": target_path.name,
         "size": length,
         "path": rel_path,
-        "saved_outside_root": saved_outside_root,
+        "saved_outside_root": rel_path is None,
     })
+
+def path_in_share(path: Path) -> str | None:
+    """path relative to the shared folder, or None if it's outside it."""
+    try:
+        return str(path.resolve().relative_to(Path(config.ROOT_DIR).resolve())).replace("\\", "/")
+    except ValueError:
+        return None
 
 # Before the static mount. It only matches code-shaped segments, so static files (which have dots) still reach the mount
 @app.get("/{code:access_code}", include_in_schema=False)
@@ -232,19 +237,62 @@ def close_cache_dir():
     shutil.rmtree(config.THUMB_CACHE_DIR, ignore_errors=True)
     config.THUMB_CACHE_DIR = None
 
-def run_server():
-    global global_server
+def parse_port(text: str) -> int:
+    """text as a port number from 1 to 65535. Raises ValueError for anything else."""
+    text = text.strip()
+    if not (text.isascii() and text.isdigit()) or not 1 <= int(text) <= 65535:
+        raise ValueError("Port must be a number from 1 to 65535.")
+    return int(text)
+
+def open_listen_socket(port: int, host: str = "0.0.0.0") -> socket.socket:
+    """Binds and listens now, so a port in use raises OSError here rather than in the server thread."""
+    return socket.create_server((host, port))
+
+def raise_file_limit():
+    """macOS gives apps 256 open files by default, which browsers' connections and downloads can use up."""
+    if sys.platform != "darwin": return
+    import resource
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    target = min(MAX_OPEN_FILES, hard)
+    if soft >= target: return
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+    except (ValueError, OSError):
+        log.warning("Couldn't raise the open file limit", exc_info=True)
+
+def start_server(sock: socket.socket) -> threading.Thread:
+    """Serves the app on sock, from open_listen_socket, in a new thread. server_started() says when it's up."""
+    global _running
     open_cache_dir()
+    raise_file_limit()
     log_config = uvicorn.config.LOGGING_CONFIG
     log_config["handlers"]["default"]["stream"] = "ext://sys.stderr"
     log_config["handlers"]["access"]["stream"] = "ext://sys.stdout"
-    
-    config_uvicorn = uvicorn.Config(app, host="0.0.0.0", port=config.PORT, log_level="error", log_config=log_config)
-    global_server = uvicorn.Server(config_uvicorn)
-    global_server.run()
+    # uvicorn can't time out a connection that never sends a request; keep-alive only drops idle ones after a response
+    server = uvicorn.Server(uvicorn.Config(app, log_level="error", log_config=log_config,
+                                           timeout_keep_alive=5, timeout_graceful_shutdown=1))
+    thread = threading.Thread(target=server.run, args=([sock],), daemon=True)
+    _running = (server, thread, sock)
+    thread.start()
+    return thread
 
-def stop_server_logic():
-    global global_server
-    if global_server:
-        global_server.should_exit = True
+def server_started() -> bool:
+    return _running is not None and _running[0].started
+
+def stop_server(timeout: float = 3.0) -> bool:
+    """Stops the server and waits up to timeout seconds for its thread, then ends access and removes the cache folder.
+
+    True if the thread has ended. Safe to call when nothing is running.
+    """
+    global _running
+    running, _running = _running, None
+    ended = True
+    if running:
+        server, thread, sock = running
+        server.should_exit = True
+        thread.join(timeout)
+        ended = not thread.is_alive()
+        sock.close()  # uvicorn only closes it if it got as far as starting
+    access.stop()
     close_cache_dir()
+    return ended

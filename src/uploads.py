@@ -11,6 +11,7 @@ from pathlib import Path
 
 import aiofiles
 from fastapi import HTTPException
+from starlette.concurrency import run_in_threadpool
 
 log = logging.getLogger(__name__)
 
@@ -128,18 +129,18 @@ async def save_upload(chunks, folder: Path, name: str, length: int) -> Path:
                     raise HTTPException(400)
                 await out.write(chunk)
                 if size >= next_check:
-                    if not has_room(folder, length - size):
+                    if not await run_in_threadpool(has_room, folder, length - size):
                         raise HTTPException(507)
                     next_check += CHECK_FREE_EVERY
         finally:
             await out.close()
         if size != length:
             raise HTTPException(400)
-        target = _move_into_place(part, folder, name)
+        target = await run_in_threadpool(_move_into_place, part, folder, name)
     except BaseException:
         part.unlink(missing_ok=True)
         raise
-    mark_downloaded(target)
+    await run_in_threadpool(mark_downloaded, target)
     return target
 
 

@@ -19,7 +19,11 @@ def main():
 
     # 4. Import GUI (Safe now because 'app' exists)
     from src.gui import launch_gui
-    
+    from src.server import stop_server
+
+    # However the app quits, the server stops and this run's cache folder goes
+    app.aboutToQuit.connect(stop_server)
+
     # 5. Launch Window
     # We assign it to 'window' so it doesn't get garbage collected
     window = launch_gui()
