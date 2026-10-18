@@ -12,7 +12,8 @@ MAX_IMAGE_BYTES = 200 * 1024 ** 2
 MAX_VIDEO_BYTES = 4 * 1024 ** 3
 MAX_PIXELS = 50_000_000
 THUMB_SIZE = (300, 300)
-IMAGE_FORMATS = {"JPEG", "PNG", "GIF", "WEBP", "BMP"}
+# MPO is a JPEG holding more than one picture (phone HDR / gain-map files); Pillow reports it as its own format.
+IMAGE_FORMATS = {"JPEG", "MPO", "PNG", "GIF", "WEBP", "BMP"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 
 
@@ -34,7 +35,7 @@ def image_thumb(path: Path):
     """The thumbnail image, or None for a format outside the allowlist or an image over the pixel cap (both checked before any decoding)."""
     with Image.open(path) as img:
         if img.format not in IMAGE_FORMATS or img.width * img.height > MAX_PIXELS: return None
-        if img.format == "JPEG": img.draft("RGB", THUMB_SIZE)
+        if img.format in ("JPEG", "MPO"): img.draft("RGB", THUMB_SIZE)
         if img.mode not in ("RGB", "L"): img = img.convert("RGB")
         img.thumbnail(THUMB_SIZE)
         return img.copy()

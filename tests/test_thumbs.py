@@ -95,6 +95,33 @@ def test_thumbnails_every_allowed_image_format(tmp_path, cache, name):
     assert thumbs.thumb_for(save_image(tmp_path / name), cache) is not None
 
 
+def save_mpo(path, size=(900, 600)):
+    first = Image.new("RGB", size, "red")
+    first.save(path, format="MPO", save_all=True, append_images=[Image.new("RGB", size, "blue")])
+    return path
+
+
+def test_thumbnails_a_multi_picture_jpeg(tmp_path, cache, monkeypatch):
+    src = save_mpo(tmp_path / "phone.jpg")
+    with Image.open(src) as img:
+        assert img.format == "MPO"  # Pillow's name for a JPEG with several pictures
+    sizes = []
+    real_draft = JpegImagePlugin.JpegImageFile.draft
+
+    def draft(self, mode, size):
+        sizes.append(size)
+        return real_draft(self, mode, size)
+
+    monkeypatch.setattr(JpegImagePlugin.JpegImageFile, "draft", draft)
+    thumb = thumbs.thumb_for(src, cache)
+    assert thumb is not None
+    assert sizes
+    with Image.open(thumb) as img:
+        assert img.format == "JPEG"
+        assert max(img.size) <= 300
+    assert not list(cache.glob("*.failed"))
+
+
 def test_image_size_cap(tmp_path, cache, monkeypatch):
     src = save_image(tmp_path / "a.png")
     monkeypatch.setattr(thumbs, "MAX_IMAGE_BYTES", src.stat().st_size - 1)
