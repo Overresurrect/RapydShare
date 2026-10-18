@@ -3,7 +3,9 @@ import type { FileItem, UploadTask } from './types';
 import { FileCard } from './components/FileCard';
 import { PreviewModal } from './components/PreviewModal';
 import { UploadManager } from './components/UploadManager';
-import { ArrowLeft, Search, Moon, Sun, LayoutGrid, List, RefreshCw, FolderOpen, Upload } from 'lucide-react';
+import { CodeEntry } from './components/CodeEntry';
+import { uploadErrorMessage } from './uploadErrors';
+import { ArrowLeft, Search, Moon, Sun, LayoutGrid, List, RefreshCw, FolderOpen, Upload, LogOut } from 'lucide-react';
 import { clsx } from 'clsx';
 
 function App() {
@@ -15,10 +17,62 @@ function App() {
   const [previewItem, setPreviewItem] = useState<FileItem | null>(null);
   const [isDark, setIsDark] = useState(false);
   const [uploadEnabled, setUploadEnabled] = useState(false);
+  const [requireCode, setRequireCode] = useState(false);
+  const [needsCode, setNeedsCode] = useState(false);
   const [tasks, setTasks] = useState<UploadTask[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
+
+  // --- Session ---
+  // Any 401 means there's no session, so the code form takes over
+  const apiFetch = useCallback(async (url: string, init?: RequestInit) => {
+    const res = await fetch(url, init);
+    if (res.status === 401) setNeedsCode(true);
+    return res;
+  }, []);
+
+  const fetchFiles = useCallback(async (path: string) => {
+    setLoading(true);
+    try {
+      const res = await apiFetch(`/api/files?path=${encodeURIComponent(path)}`);
+      if (!res.ok) throw new Error('Failed to load');
+      const data = await res.json();
+      setItems(data);
+      setCurrentPath(path);
+      window.scrollTo(0, 0);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [apiFetch]);
+
+  const loadSession = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/server_info');
+      if (!res.ok) throw new Error('Failed to load');
+      const info = await res.json();
+      setUploadEnabled(!!info.allow_upload);
+      setRequireCode(!!info.require_code);
+      setNeedsCode(false);
+      fetchFiles('');
+    } catch (err) {
+      console.error(err);
+      setUploadEnabled(false);
+    }
+  }, [apiFetch, fetchFiles]);
+
+  const handleDisconnect = async () => {
+    try {
+      await fetch('/api/logout', { method: 'POST' });
+    } catch (err) {
+      console.error(err);
+    }
+    setItems([]);
+    setPreviewItem(null);
+    setNeedsCode(true);
+  };
 
   // --- Initialization ---
   useEffect(() => {
@@ -33,13 +87,8 @@ function App() {
     const savedView = localStorage.getItem('viewMode') as 'grid' | 'list';
     if (savedView) setViewMode(savedView);
 
-    fetchFiles('');
-
-    fetch('/api/server_info')
-      .then(res => res.ok ? res.json() : Promise.reject(res.status))
-      .then(info => setUploadEnabled(!!info.allow_upload))
-      .catch(() => setUploadEnabled(false));
-  }, []);
+    loadSession();
+  }, [loadSession]);
 
   // --- Actions ---
   const toggleTheme = () => {
@@ -58,22 +107,6 @@ function App() {
     const newView = viewMode === 'grid' ? 'list' : 'grid';
     setViewMode(newView);
     localStorage.setItem('viewMode', newView);
-  };
-
-  const fetchFiles = async (path: string) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
-      if (!res.ok) throw new Error('Failed to load');
-      const data = await res.json();
-      setItems(data);
-      setCurrentPath(path);
-      window.scrollTo(0, 0);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
   };
 
   const handleNavigateUp = () => {
@@ -105,6 +138,8 @@ function App() {
   const startUpload = useCallback((task: UploadTask) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/upload');
+    xhr.setRequestHeader('X-File-Name', encodeURIComponent(task.file.name));
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
 
     xhr.upload.addEventListener('progress', (e) => {
       if (e.lengthComputable) {
@@ -118,14 +153,8 @@ function App() {
         updateTask(task.id, { status: 'done', progress: 100 });
         fetchFiles(currentPath);
       } else {
-        let msg = `Error ${xhr.status}`;
-        try {
-          const parsed = JSON.parse(xhr.responseText);
-          if (parsed && parsed.detail) msg = parsed.detail;
-        } catch {
-          // fall back to status code
-        }
-        updateTask(task.id, { status: 'error', error: msg });
+        if (xhr.status === 401) setNeedsCode(true);
+        updateTask(task.id, { status: 'error', error: uploadErrorMessage(xhr.status) });
       }
     });
 
@@ -137,11 +166,9 @@ function App() {
       updateTask(task.id, { status: 'error', error: 'Cancelled' });
     });
 
-    const form = new FormData();
-    form.append('file', task.file);
-    xhr.send(form);
+    xhr.send(task.file);
     updateTask(task.id, { xhr, status: 'uploading' });
-  }, [currentPath, updateTask]);
+  }, [currentPath, updateTask, fetchFiles]);
 
   const enqueueFiles = useCallback((files: FileList | null) => {
     if (!uploadEnabled || !files || files.length === 0) return;
@@ -221,6 +248,8 @@ function App() {
       });
   }, [items, searchQuery]);
 
+  if (needsCode) return <CodeEntry onSignedIn={loadSession} />;
+
   return (
     <div
       className="min-h-screen flex flex-col transition-colors duration-200"
@@ -272,6 +301,17 @@ function App() {
             <button onClick={() => fetchFiles(currentPath)} className="p-2 rounded-lg text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors">
               <RefreshCw size={20} className={clsx(loading && "animate-spin")} />
             </button>
+
+            {requireCode && (
+              <button
+                onClick={handleDisconnect}
+                title="Disconnect"
+                className="flex items-center gap-2 p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm font-medium"
+              >
+                <LogOut size={20} />
+                <span className="hidden sm:inline">Disconnect</span>
+              </button>
+            )}
 
             {uploadEnabled && (
               <>

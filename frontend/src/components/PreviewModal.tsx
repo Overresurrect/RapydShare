@@ -47,8 +47,9 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ item, onClose, onDow
              return (
                 <iframe 
                     src={fileUrl} 
-                    className="w-full h-[85vh] bg-white rounded-lg border-none" 
+                    className="w-full h-[85vh] bg-white rounded-lg border-none"
                     title="Text Viewer"
+                    sandbox=""
                 />
             );
         }
