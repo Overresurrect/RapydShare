@@ -108,7 +108,7 @@ elif IS_MAC:
     build_args += [
         '--noconfirm',
         '--icon=assets/RapydShare.icns',
-        '--osx-bundle-identifier=com.arthosx.rapydshare',
+        '--osx-bundle-identifier=io.github.overresurrect.rapydshare',
     ]
 
     python_target = get_python_macos_target()
