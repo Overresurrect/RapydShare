@@ -1,7 +1,6 @@
 fastapi
 uvicorn
 aiofiles
-python-multipart
 # GUI
 PyQt6
 PyQt6-Fluent-Widgets
@@ -11,5 +10,4 @@ pillow
 opencv-python-headless
 # Packaging
 pyinstaller
-tinyaes
 packaging

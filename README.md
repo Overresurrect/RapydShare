@@ -1,6 +1,6 @@
 # RapydShare ⚡
 
-A modern, fast, and secure local file transfer tool.
+A modern, fast local file transfer tool.
 
 ![RapydShare Screenshot](assets/Screenshot.jpg)\
 *RapydShare.exe*
@@ -15,7 +15,8 @@ A modern, fast, and secure local file transfer tool.
 - **Modern UI:** Clean, responsive Windows 11 style interface (PyQt6 + Fluent Widgets).
 - **Web Client:** Responsive React + TypeScript web interface for mobile and desktop clients.
 - **Rich Previews:** Built-in image, video, and PDF previews.
-- **Security:** Optional authentication (Username/Password) to restrict access.
+- **Access Code:** Every share is protected by an access code. It is shown in the app, carried in the QR code and link, and typed into the code boxes if you open the address by hand.
+- **Safe Defaults:** Hidden and system files are never shared, and uploads are off until you turn them on.
 - **Windows & macOS:** Desktop app for both, powered by Python (FastAPI) and React.
 
 ## 🛠️ Tech Stack
@@ -49,7 +50,9 @@ Requires a Mac with Apple Silicon (M1 or newer) running macOS 14 Sonoma or later
 
 1. Select a folder to share and click **Start Server**.
 2. (Optional) Flip on **Allow Uploads** and pick an upload folder if you want clients to be able to send files to you.
-3. Open the URL shown in the tool on your client device (iPhone, Android, laptop, etc.), including the port number — or scan the QR code.
+3. Open the URL shown in the tool on your client device (iPhone, Android, laptop, etc.), including the port number — or scan the QR code, which carries the access code. If you type the address instead, enter the access code shown in the app into the code boxes.
+
+> **Connections are not encrypted.** The access code keeps other people on the network from browsing your files, but anyone who can watch the traffic can read it. Only share on networks you trust.
 
 ## 💻 Development Setup (For Contributors)
 
@@ -71,6 +74,12 @@ cd RapydShare
 
 ```bash
 pip install -r requirements.txt
+```
+
+For release builds, install the hash-locked set instead, so you get exactly the vetted packages:
+
+```bash
+pip install --require-hashes -r requirements.lock
 ```
 
 ### 3. Frontend Setup
@@ -99,6 +108,8 @@ npm run dev
 ```
 
 ### 5. Building the App
+
+Install the locked dependencies first (see Backend Setup), then:
 
 ```bash
 # Build the React frontend first
