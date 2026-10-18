@@ -67,10 +67,15 @@ def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid creds", {"WWW-Authenticate": "Basic"})
     return credentials.username
 
+def resolve_in_root(path: str) -> Path:
+    root = Path(config.ROOT_DIR).resolve()
+    real_path = (root / path).resolve()
+    if not real_path.is_relative_to(root): raise HTTPException(403)
+    return real_path
+
 @app.get("/api/files", dependencies=[Depends(get_current_username)])
 async def list_files(path: str = ""):
-    req_path = (Path(config.ROOT_DIR) / path).resolve()
-    if not str(req_path).startswith(str(Path(config.ROOT_DIR).resolve())): raise HTTPException(403)
+    req_path = resolve_in_root(path)
     if not req_path.exists(): raise HTTPException(404)
     
     items = []
@@ -96,7 +101,7 @@ async def list_files(path: str = ""):
 
 @app.get("/api/thumb", dependencies=[Depends(get_current_username)])
 async def get_thumb(path: str):
-    real_path = (Path(config.ROOT_DIR) / path).resolve()
+    real_path = resolve_in_root(path)
     import hashlib
     hash_name = hashlib.md5(str(real_path).encode('utf-8')).hexdigest() + ".jpg"
     thumb_path = config.THUMB_CACHE_DIR / hash_name
@@ -110,13 +115,13 @@ async def get_thumb(path: str):
 
 @app.get("/api/download", dependencies=[Depends(get_current_username)])
 async def download_file(path: str):
-    real_path = (Path(config.ROOT_DIR) / path).resolve()
+    real_path = resolve_in_root(path)
     if real_path.is_file(): return FileResponse(real_path, filename=real_path.name)
     raise HTTPException(404)
 
 @app.get("/api/download_folder", dependencies=[Depends(get_current_username)])
 async def download_folder(path: str):
-    real_path = (Path(config.ROOT_DIR) / path).resolve()
+    real_path = resolve_in_root(path)
     if not real_path.is_dir(): raise HTTPException(400)
     temp_zip = config.THUMB_CACHE_DIR / f"dl_{int(datetime.now().timestamp())}.zip"
     loop = asyncio.get_event_loop()
@@ -125,7 +130,7 @@ async def download_folder(path: str):
 
 @app.get("/api/view", dependencies=[Depends(get_current_username)])
 async def view_media(path: str):
-    real_path = (Path(config.ROOT_DIR) / path).resolve()
+    real_path = resolve_in_root(path)
     if real_path.exists(): return FileResponse(real_path)
     raise HTTPException(404)
 
