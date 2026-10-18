@@ -34,7 +34,8 @@ def sanitize_filename(name: str) -> str:
     name = name.strip().strip('.')
     if not name:
         return "unnamed"
-    stem = name.rsplit('.', 1)[0] if '.' in name else name
+    # Windows treats "aux.tar.gz" like "aux", so check everything before the first dot
+    stem = name.split('.', 1)[0]
     if stem.upper() in _WINDOWS_RESERVED:
         name = '_' + name
     return name

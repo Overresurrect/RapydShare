@@ -22,6 +22,7 @@ from src.server import sanitize_filename
     ("CON", "_CON"),
     ("con.txt", "_con.txt"),
     ("LPT9.log", "_LPT9.log"),
+    ("aux.tar.gz", "_aux.tar.gz"),
     ("CONSOLE.txt", "CONSOLE.txt"),
 ])
 def test_sanitize_filename(name, expected):
