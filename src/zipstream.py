@@ -1,9 +1,14 @@
+import asyncio
 import os
 import threading
 import weakref
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Iterator
+from typing import AsyncIterator, Callable, Iterator
+
+import anyio
+import anyio.lowlevel
 
 from src.paths import is_hidden, is_listable, resolves_inside
 
@@ -11,6 +16,7 @@ MAX_ZIPS = 2
 CHUNK_BYTES = 1024 * 1024
 
 _free = threading.BoundedSemaphore(MAX_ZIPS)
+pool = ThreadPoolExecutor(max_workers=MAX_ZIPS, thread_name_prefix="zip")
 
 
 class _Slot:
@@ -79,11 +85,43 @@ def _chunks(folder: Path, root: Path, skip: Path | None, slot: _Slot) -> Iterato
         slot.release()
 
 
-def zip_stream(folder: Path, root: Path, skip: Path | None) -> Iterator[bytes] | None:
+class ZipStream:
+    """A ZIP's chunks. close() stops the work and frees the slot, whether or not it started."""
+    def __init__(self, chunks: Iterator[bytes], slot: _Slot):
+        self._chunks, self._slot = chunks, slot
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> bytes:
+        return next(self._chunks)
+
+    def close(self):
+        try:
+            self._chunks.close()
+        finally:
+            self._slot.release()
+
+
+def zip_stream(folder: Path, root: Path, skip: Path | None) -> ZipStream | None:
     """folder as a ZIP, in chunks, or None if MAX_ZIPS are already running.
 
-    Closing or dropping the iterator, started or not, stops the work and frees the slot.
+    Closing or dropping the stream, started or not, stops the work and frees the slot.
     """
     if not _free.acquire(blocking=False):
         return None
-    return _chunks(folder, root, skip, _Slot())
+    slot = _Slot()
+    return ZipStream(_chunks(folder, root, skip, slot), slot)
+
+
+async def in_pool(work: Callable, *args):
+    """work(*args) in the ZIP pool. Shielded: a cancelled request waits for it rather than leave it running."""
+    with anyio.CancelScope(shield=True):
+        return await asyncio.wrap_future(pool.submit(work, *args))
+
+
+async def chunks_in_pool(stream: ZipStream) -> AsyncIterator[bytes]:
+    """stream's chunks, each one made in the ZIP pool. The caller closes stream when it's done."""
+    while (chunk := await in_pool(next, stream, None)) is not None:
+        yield chunk
+        await anyio.lowlevel.checkpoint()  # Where a request whose client went away is cancelled

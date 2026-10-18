@@ -20,7 +20,7 @@ from src.middleware import BrowserProtection
 from src.paths import is_listable, resolve_in_root
 from src.uploads import declared_length, has_room, sanitize_filename, save_upload
 from src.utils import generate_thumbnail
-from src.zipstream import zip_stream
+from src.zipstream import ZipStream, chunks_in_pool, in_pool, zip_stream
 
 log = logging.getLogger(__name__)
 executor = ThreadPoolExecutor(max_workers=4)
@@ -137,11 +137,22 @@ async def download_folder(path: str):
     if not real_path.is_dir(): raise HTTPException(400)
     root = Path(config.ROOT_DIR).resolve()
     skip = config.THUMB_CACHE_DIR.resolve() if config.THUMB_CACHE_DIR else None
-    chunks = zip_stream(real_path, root, skip)
-    if chunks is None: raise HTTPException(503, headers={"Retry-After": "5"})
-    # A sync iterator runs in Starlette's threadpool, apart from the thumbnail executor
-    return StreamingResponse(chunks, media_type="application/zip",
-                             headers={"Content-Disposition": attachment(f"{real_path.name}.zip")})
+    stream = zip_stream(real_path, root, skip)
+    if stream is None: raise HTTPException(503, headers={"Retry-After": "5"})
+    return ZipResponse(stream, f"{real_path.name}.zip")
+
+class ZipResponse(StreamingResponse):
+    """A ZIP made in the ZIP pool. However the response ends, the ZIP stops and its slot is freed before this returns."""
+    def __init__(self, stream: ZipStream, filename: str):
+        super().__init__(chunks_in_pool(stream), media_type="application/zip",
+                         headers={"Content-Disposition": attachment(filename)})
+        self.stream = stream
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await in_pool(self.stream.close)
 
 def attachment(filename: str) -> str:
     """Content-Disposition in the same form as FileResponse's."""

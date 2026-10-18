@@ -1,13 +1,17 @@
+import asyncio
+import gc
 import io
 import os
 import stat
 import sys
 import threading
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import ClientDisconnect
 
 from src import zipstream
 from src.config import config
@@ -50,7 +54,8 @@ def held(share):
 
     yield take
     for stream in streams:
-        list(stream)  # Runs each to the end, so its slot is freed now rather than when it's collected
+        stream.close()  # Never started, so this drops its frame, and with it the slot
+    assert all_slots_free_now()
 
 
 # --- Concurrent downloads and the disk ---
@@ -78,6 +83,19 @@ def test_concurrent_folder_downloads_each_get_their_own_folder(client, share, mo
     assert music.headers["content-disposition"] == 'attachment; filename="music.zip"'
     assert zip_contents(docs.content) == {"notes.txt": b"notes"}
     assert zip_contents(music.content) == {"song.txt": b"la la"}
+
+
+def test_zip_work_runs_in_its_own_pool(client, monkeypatch):
+    real_members = zipstream.zip_members
+    threads = []
+
+    def zip_members(*args):
+        threads.append(threading.current_thread().name)
+        yield from real_members(*args)
+
+    monkeypatch.setattr(zipstream, "zip_members", zip_members)
+    assert download(client) == {"notes.txt": b"notes"}
+    assert threads and threads[0].startswith("zip")
 
 
 def test_folder_zip_leaves_nothing_in_the_cache_folder(client):
@@ -218,7 +236,7 @@ def test_a_finished_zip_frees_its_slot(client, held):
 
 
 def test_an_abandoned_stream_frees_its_slot(held, share):
-    # Starlette stops asking for chunks and drops the iterator when the client goes away
+    # The iterator itself, dropped or closed partway; the route closes it through in_pool (see below)
     dropped = zip_stream(share.resolve(), share.resolve(), None)
     closed = zip_stream(share.resolve(), share.resolve(), None)
     next(dropped)
@@ -233,3 +251,121 @@ def test_a_stream_that_never_started_frees_its_slot(held, share):
     assert unstarted is not None
     del unstarted
     assert all(held() is not None for _ in range(MAX_ZIPS))
+
+
+class LeavingClient:
+    """ASGI receive and send for a client that goes away partway through a download.
+
+    ASGI 2.3 servers such as uvicorn report it with http.disconnect; from 2.4 on, send raises OSError.
+    """
+    def __init__(self, spec_version, leaves="after the first chunk"):
+        self.spec_version = spec_version
+        self.leaves = leaves  # "at once", "after the first chunk", or "when told" (by leave())
+        self.requests = [{"type": "http.request", "body": b"", "more_body": False}]
+        self.told = threading.Event()  # The server has been told the client left
+        self.error = None  # What the request raised
+
+    def leave(self):
+        """Can be called from any thread."""
+        self.loop.call_soon_threadsafe(self.leaving.set)
+
+    async def receive(self):
+        if self.requests: return self.requests.pop()
+        await self.leaving.wait()
+        self.told.set()
+        return {"type": "http.disconnect"}
+
+    async def send(self, message):
+        if self.leaving.is_set() and self.spec_version >= "2.4":
+            self.told.set()
+            raise OSError("Connection reset")
+        if message["type"] == "http.response.body" and message["body"] and self.leaves == "after the first chunk":
+            self.leaving.set()
+
+    def download_folder(self, path, then):
+        """Runs the request, then calls then() on the same event loop, before it has a chance to tidy up."""
+        scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": self.spec_version},
+                 "http_version": "1.1", "method": "GET", "scheme": "http",
+                 "path": "/api/download_folder", "raw_path": b"/api/download_folder",
+                 "query_string": f"path={path}".encode(), "root_path": "",
+                 "headers": [(b"host", b"127.0.0.1:8000")],
+                 "client": ("127.0.0.1", 50000), "server": ("127.0.0.1", 8000)}
+
+        async def run():
+            self.loop, self.leaving = asyncio.get_running_loop(), asyncio.Event()
+            if self.leaves == "at once": self.leaving.set()
+            try:
+                await app(scope, self.receive, self.send)
+            except Exception as e:
+                self.error = e
+            return then()
+
+        gc.disable()  # The slot must come back when the request ends, not when the cycle collector runs
+        try:
+            return asyncio.run(run())
+        finally:
+            gc.enable()
+
+
+@pytest.fixture
+def big_files(share, monkeypatch):
+    """20 incompressible files in docs, zipped in order. Returns them and the ones the ZIP has asked for so far."""
+    big = [share / "docs" / f"{n}.bin" for n in range(20)]
+    for path in big:
+        path.write_bytes(os.urandom(2 * zipstream.CHUNK_BYTES))
+    asked = []
+
+    def zip_members(folder, root, skip):
+        for path in big:
+            asked.append(path)
+            yield path, path.name
+
+    monkeypatch.setattr(zipstream, "zip_members", zip_members)
+    return big, asked
+
+
+def all_slots_free(held):
+    return all(held() is not None for _ in range(MAX_ZIPS))
+
+
+def all_slots_free_now():
+    return zipstream._free._value == MAX_ZIPS
+
+
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+def test_a_client_that_goes_away_stops_the_zip_and_frees_its_slot(held, big_files, spec_version):
+    big, asked = big_files
+    client = LeavingClient(spec_version)
+    assert client.download_folder("docs", lambda: all_slots_free(held))
+    assert client.told.is_set()
+    assert len(asked) < len(big)
+    assert client.error is None if spec_version == "2.3" else isinstance(client.error, ClientDisconnect)
+
+
+def test_a_client_that_goes_away_while_a_chunk_is_made_frees_its_slot(held, big_files, monkeypatch):
+    big, asked = big_files
+    client = LeavingClient("2.3", leaves="when told")
+    members = zipstream.zip_members
+
+    def zip_members(*args):
+        for n, member in enumerate(members(*args)):
+            if n == 1:
+                # In the ZIP thread: the request is cancelled while this step is still running
+                client.leave()
+                assert client.told.wait(5)
+                time.sleep(0.1)
+            yield member
+
+    monkeypatch.setattr(zipstream, "zip_members", zip_members)
+    assert client.download_folder("docs", lambda: all_slots_free(held))
+    assert len(asked) < len(big)
+    assert client.error is None  # Nothing tried to close the ZIP while that step was still running
+
+
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+def test_a_client_that_is_gone_before_the_first_chunk_frees_its_slot(held, big_files, spec_version):
+    big, asked = big_files
+    client = LeavingClient(spec_version, leaves="at once")
+    assert client.download_folder("docs", lambda: all_slots_free(held))
+    assert len(asked) < len(big)
+    assert client.error is None if spec_version == "2.3" else isinstance(client.error, ClientDisconnect)
