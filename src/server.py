@@ -5,6 +5,8 @@ import logging
 import uvicorn
 import mimetypes
 import asyncio
+import shutil
+import tempfile
 from pathlib import Path
 from urllib.parse import quote, unquote
 from concurrent.futures import ThreadPoolExecutor
@@ -18,8 +20,8 @@ from src.access import CODE_ALPHABET, CODE_LENGTH, SESSION_COOKIE, TooManyTries,
 from src.config import config
 from src.middleware import BrowserProtection
 from src.paths import is_listable, resolve_in_root
+from src.thumbs import thumb_for
 from src.uploads import declared_length, has_room, sanitize_filename, save_upload
-from src.utils import generate_thumbnail
 from src.zipstream import ZipStream, chunks_in_pool, in_pool, zip_stream
 
 log = logging.getLogger(__name__)
@@ -114,16 +116,12 @@ async def list_files(path: str = ""):
 @app.get("/api/thumb", dependencies=[Depends(require_session)])
 async def get_thumb(path: str):
     real_path = resolve_in_root(path)
-    import hashlib
-    hash_name = hashlib.md5(str(real_path).encode('utf-8')).hexdigest() + ".jpg"
-    thumb_path = config.THUMB_CACHE_DIR / hash_name
-    
-    if thumb_path.exists(): return FileResponse(thumb_path)
-    if real_path.is_file():
-        loop = asyncio.get_event_loop()
-        success = await loop.run_in_executor(executor, generate_thumbnail, real_path, thumb_path)
-        if success: return FileResponse(thumb_path)
-    raise HTTPException(404)
+    cache_dir = config.THUMB_CACHE_DIR
+    if cache_dir is None: raise HTTPException(404)
+    loop = asyncio.get_running_loop()
+    thumb = await loop.run_in_executor(executor, thumb_for, real_path, cache_dir)
+    if thumb is None: raise HTTPException(404)
+    return FileResponse(thumb)
 
 @app.get("/api/download", dependencies=[Depends(require_session)])
 async def download_file(path: str):
@@ -224,8 +222,19 @@ async def enter_with_code(code: str, request: Request):
 if os.path.exists(config.FRONTEND_DIST_DIR):
     app.mount("/", StaticFiles(directory=config.FRONTEND_DIST_DIR, html=True), name="static")
 
+def open_cache_dir() -> Path:
+    """Makes this run's private thumbnail folder."""
+    config.THUMB_CACHE_DIR = Path(tempfile.mkdtemp(prefix="RapydShare_"))
+    return config.THUMB_CACHE_DIR
+
+def close_cache_dir():
+    if config.THUMB_CACHE_DIR is None: return
+    shutil.rmtree(config.THUMB_CACHE_DIR, ignore_errors=True)
+    config.THUMB_CACHE_DIR = None
+
 def run_server():
     global global_server
+    open_cache_dir()
     log_config = uvicorn.config.LOGGING_CONFIG
     log_config["handlers"]["default"]["stream"] = "ext://sys.stderr"
     log_config["handlers"]["access"]["stream"] = "ext://sys.stdout"
@@ -238,3 +247,4 @@ def stop_server_logic():
     global global_server
     if global_server:
         global_server.should_exit = True
+    close_cache_dir()
