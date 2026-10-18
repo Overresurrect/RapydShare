@@ -133,6 +133,8 @@ def finish_mac_app(app_path):
         "CFBundleVersion": version,
         "LSMinimumSystemVersion": get_min_macos_version(),
         "NSLocalNetworkUsageDescription": "RapydShare shares files with devices on your local network.",
+        # Files the app writes (uploads) are quarantined, so macOS warns before opening them
+        "LSFileQuarantineEnabled": True,
     })
 
     with open(plist_path, "wb") as f:

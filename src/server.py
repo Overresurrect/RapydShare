@@ -1,25 +1,29 @@
 import os
-import re
 import json
+import errno
+import logging
 import uvicorn
 import mimetypes
 import shutil
 import asyncio
 import uuid
-import aiofiles
 from pathlib import Path
+from urllib.parse import unquote
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import FastAPI, HTTPException, Depends, Request, Response, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from starlette.convertors import Convertor, register_url_convertor
+from starlette.requests import ClientDisconnect
 
 from src.access import CODE_ALPHABET, CODE_LENGTH, SESSION_COOKIE, TooManyTries, access, normalize_code
 from src.config import config
 from src.paths import is_listable, resolve_in_root
+from src.uploads import declared_length, has_room, sanitize_filename, save_upload
 from src.utils import generate_thumbnail
 
+log = logging.getLogger(__name__)
 executor = ThreadPoolExecutor(max_workers=4)
 app = FastAPI()
 
@@ -27,38 +31,6 @@ MAX_LOGIN_BODY = 1024
 
 # Global variable to hold the server instance
 global_server = None
-
-_WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL",
-                     *(f"COM{i}" for i in range(1, 10)),
-                     *(f"LPT{i}" for i in range(1, 10))}
-
-def sanitize_filename(name: str) -> str:
-    name = name.replace('\\', '/').rsplit('/', 1)[-1]
-    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
-    name = name.strip().strip('.')
-    if not name:
-        return "unnamed"
-    # Windows treats "aux.tar.gz" like "aux", so check everything before the first dot
-    stem = name.split('.', 1)[0]
-    if stem.upper() in _WINDOWS_RESERVED:
-        name = '_' + name
-    return name
-
-def resolve_unique_path(target_dir: Path, filename: str) -> Path:
-    candidate = target_dir / filename
-    if not candidate.exists():
-        return candidate
-    if '.' in filename:
-        stem, ext = filename.rsplit('.', 1)
-        ext = '.' + ext
-    else:
-        stem, ext = filename, ''
-    i = 1
-    while True:
-        candidate = target_dir / f"{stem} ({i}){ext}"
-        if not candidate.exists():
-            return candidate
-        i += 1
 
 class CodeConvertor(Convertor):
     """Matches one path segment that is the access code, in any case and with any dashes."""
@@ -182,41 +154,22 @@ async def server_info():
     return {"allow_upload": bool(config.ALLOW_UPLOAD), "require_code": access.require_code}
 
 @app.post("/api/upload", dependencies=[Depends(require_session)])
-async def upload_file(file: UploadFile = File(...)):
-    if not config.ALLOW_UPLOAD:
-        raise HTTPException(403, "Uploads are disabled")
-    if not config.UPLOAD_DIR:
-        raise HTTPException(500, "Upload directory is not configured")
-
+async def upload_file(request: Request):
+    # No body parameters, so nothing is read or spooled to disk before these checks
+    if not config.ALLOW_UPLOAD: raise HTTPException(403)
+    if not config.UPLOAD_DIR or not os.path.isdir(config.UPLOAD_DIR): raise HTTPException(503)
+    length = declared_length(request.headers.get("content-length"))
     upload_dir = Path(config.UPLOAD_DIR).resolve()
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    if not has_room(upload_dir, length): raise HTTPException(507)
 
-    safe_name = sanitize_filename(file.filename or "")
-    target_path = resolve_unique_path(upload_dir, safe_name)
-
+    name = sanitize_filename(unquote(request.headers.get("x-file-name", "")))
     try:
-        target_path.resolve().relative_to(upload_dir)
-    except ValueError:
-        raise HTTPException(400, "Invalid upload path")
-
-    total_written = 0
-    try:
-        async with aiofiles.open(target_path, 'wb') as out:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                await out.write(chunk)
-                total_written += len(chunk)
-    except Exception as e:
-        try:
-            if target_path.exists():
-                target_path.unlink()
-        except Exception:
-            pass
-        raise HTTPException(500, f"Upload failed: {e}")
-    finally:
-        await file.close()
+        target_path = await save_upload(request.stream(), upload_dir, name, length)
+    except ClientDisconnect:
+        raise HTTPException(400)
+    except OSError as e:
+        log.exception("Upload failed")
+        raise HTTPException(507 if e.errno == errno.ENOSPC else 500)
 
     try:
         rel_path = str(target_path.resolve().relative_to(Path(config.ROOT_DIR).resolve())).replace("\\", "/")
@@ -227,7 +180,7 @@ async def upload_file(file: UploadFile = File(...)):
 
     return JSONResponse({
         "name": target_path.name,
-        "size": total_written,
+        "size": length,
         "path": rel_path,
         "saved_outside_root": saved_outside_root,
     })
