@@ -19,15 +19,18 @@ from starlette.requests import ClientDisconnect
 
 from src.access import CODE_ALPHABET, CODE_LENGTH, SESSION_COOKIE, TooManyTries, access, normalize_code
 from src.config import config
+from src.middleware import BrowserProtection
 from src.paths import is_listable, resolve_in_root
 from src.uploads import declared_length, has_room, sanitize_filename, save_upload
 from src.utils import generate_thumbnail
 
 log = logging.getLogger(__name__)
 executor = ThreadPoolExecutor(max_workers=4)
-app = FastAPI()
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(BrowserProtection)
 
 MAX_LOGIN_BODY = 1024
+VIEW_SANDBOX = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'"
 
 # Global variable to hold the server instance
 global_server = None
@@ -143,11 +146,21 @@ async def download_folder(path: str):
         raise
     return FileResponse(temp_zip, filename=f"{real_path.name}.zip", background=BackgroundTask(temp_zip.unlink))
 
+def renders_inline(mime: str | None) -> bool:
+    """Images except SVG, video, audio, PDF and plain text. Anything else could run script."""
+    if not mime: return False
+    if mime.startswith("image/"): return mime != "image/svg+xml"
+    return mime.startswith(("video/", "audio/")) or mime in ("application/pdf", "text/plain")
+
 @app.get("/api/view", dependencies=[Depends(require_session)])
 async def view_media(path: str):
     real_path = resolve_in_root(path)
-    if real_path.is_file(): return FileResponse(real_path)
-    raise HTTPException(404)
+    if not real_path.is_file(): raise HTTPException(404)
+    mime, _ = mimetypes.guess_type(real_path.name)
+    if not renders_inline(mime): mime = "text/plain"
+    # Browsers' PDF viewers refuse to render in a sandbox; nosniff and the viewer's own isolation cover PDFs
+    headers = {} if mime == "application/pdf" else {"Content-Security-Policy": VIEW_SANDBOX}
+    return FileResponse(real_path, media_type=mime, headers=headers)
 
 @app.get("/api/server_info", dependencies=[Depends(require_session)])
 async def server_info():

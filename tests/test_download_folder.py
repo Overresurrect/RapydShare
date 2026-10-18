@@ -76,6 +76,6 @@ def test_partial_zip_is_deleted_when_zipping_fails(share, monkeypatch):
 
     monkeypatch.setattr(shutil, "make_archive", make_archive)
 
-    r = TestClient(app, raise_server_exceptions=False).get("/api/download_folder", params={"path": "docs"})
+    r = TestClient(app, base_url="http://127.0.0.1:8000", raise_server_exceptions=False).get("/api/download_folder", params={"path": "docs"})
     assert r.status_code == 500
     assert list(config.THUMB_CACHE_DIR.iterdir()) == []

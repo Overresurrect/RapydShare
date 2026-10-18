@@ -129,7 +129,7 @@ def test_unsafe_text_is_403(client, endpoint, path):
 
 @pytest.fixture
 def lenient_client(share):
-    return TestClient(app, raise_server_exceptions=False)
+    return TestClient(app, base_url="http://127.0.0.1:8000", raise_server_exceptions=False)
 
 
 @pytest.mark.parametrize("endpoint", ALL_ENDPOINTS)

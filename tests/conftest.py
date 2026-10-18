@@ -54,7 +54,7 @@ def code_on(share):
 
 @pytest.fixture
 def client(share):
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1:8000")
 
 
 @pytest.fixture
