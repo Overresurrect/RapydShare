@@ -86,19 +86,25 @@ def _chunks(folder: Path, root: Path, skip: Path | None, slot: _Slot) -> Iterato
 
 
 class ZipStream:
-    """A ZIP's chunks. close() stops the work and frees the slot, whether or not it started."""
+    """A ZIP's chunks. close() stops the work and frees the slot, whether or not it started.
+
+    close() waits for a chunk that's being made, so it's safe from another thread.
+    """
     def __init__(self, chunks: Iterator[bytes], slot: _Slot):
         self._chunks, self._slot = chunks, slot
+        self._lock = threading.Lock()
 
     def __iter__(self):
         return self
 
     def __next__(self) -> bytes:
-        return next(self._chunks)
+        with self._lock:
+            return next(self._chunks)
 
     def close(self):
         try:
-            self._chunks.close()
+            with self._lock:
+                self._chunks.close()
         finally:
             self._slot.release()
 

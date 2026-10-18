@@ -253,6 +253,28 @@ def test_a_stream_that_never_started_frees_its_slot(held, share):
     assert all(held() is not None for _ in range(MAX_ZIPS))
 
 
+def test_closing_while_a_chunk_is_made_waits_for_it(held, share, monkeypatch):
+    # A raw Task.cancel at shutdown can get past the shield, so close() may come while a step still runs
+    making, finish = threading.Event(), threading.Event()
+    members = zipstream.zip_members
+
+    def zip_members(*args):
+        making.set()
+        assert finish.wait(5)
+        yield from members(*args)
+
+    monkeypatch.setattr(zipstream, "zip_members", zip_members)
+    stream = held()
+    with ThreadPoolExecutor(1) as pool:
+        step = pool.submit(next, stream, None)
+        assert making.wait(5)
+        threading.Timer(0.2, finish.set).start()
+        stream.close()
+        assert step.done()
+    assert step.result() is not None
+    assert all_slots_free_now()
+
+
 class LeavingClient:
     """ASGI receive and send for a client that goes away partway through a download.
 
