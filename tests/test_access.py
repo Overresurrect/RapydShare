@@ -121,7 +121,9 @@ def test_code_route_does_not_shadow_static_files(client, code_on, tmp_path, monk
     (dist / "Rapydshare.ico").write_bytes(b"icon")
     (dist / "assets" / "index-AB12.js").write_text("js")
     mount = Mount("/", StaticFiles(directory=dist, html=True), name="static")
-    monkeypatch.setattr(app.router, "routes", [*app.router.routes, mount])
+    # Drop any real bundle mounted at import (when frontend/dist exists) so the temporary one is what gets served
+    routes = [r for r in app.router.routes if not (isinstance(r, Mount) and r.name == "static")]
+    monkeypatch.setattr(app.router, "routes", [*routes, mount])
 
     assert client.get("/").text == "<html>client</html>"
     assert client.get("/vite.svg").text == "<svg/>"
