@@ -60,9 +60,16 @@ def _names_hidden(path: str) -> bool:
     return any(p not in (".", "..") and is_hidden_name(p) for p in PureWindowsPath(path).parts)
 
 
-def _hidden_below(path: Path, root: Path) -> bool:
+def hidden_below(path: Path, root: Path) -> bool:
+    """True if any component of path below root is hidden. path must be resolved and inside root."""
     parts = path.relative_to(root).parts
     return any(is_hidden(root.joinpath(*parts[:i + 1])) for i in range(len(parts)))
+
+
+def is_listable(entry: Path, root: Path) -> bool:
+    """The listing's version of resolve_in_root's checks: the entry is not hidden, and neither is anything it resolves to."""
+    return (not is_hidden(entry) and resolves_inside(entry, root)
+            and not hidden_below(entry.resolve(), root))
 
 
 def resolve_in_root(path: str) -> Path:
@@ -78,7 +85,7 @@ def resolve_in_root(path: str) -> Path:
         if not real_path.is_relative_to(root):
             raise HTTPException(403)
         real_path.stat()
-        if _hidden_below(real_path, root):
+        if hidden_below(real_path, root):
             raise HTTPException(404)
     except (OSError, ValueError, RuntimeError):
         raise HTTPException(404)

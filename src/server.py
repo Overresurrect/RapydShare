@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from src.config import config
-from src.paths import is_hidden, resolve_in_root, resolves_inside
+from src.paths import is_listable, resolve_in_root
 from src.utils import generate_thumbnail
 
 executor = ThreadPoolExecutor(max_workers=4)
@@ -82,7 +82,7 @@ async def list_files(path: str = ""):
             for entry in entries:
                 try:
                     entry_path = Path(entry.path)
-                    if is_hidden(entry_path) or not resolves_inside(entry_path, root): continue
+                    if not is_listable(entry_path, root): continue
                     stat = entry.stat()
                     is_dir = entry.is_dir()
                     mime, _ = mimetypes.guess_type(entry.path)

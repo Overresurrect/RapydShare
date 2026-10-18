@@ -94,6 +94,11 @@ def links_to_hidden(hidden_share):
     return hidden_share
 
 
+def test_links_to_hidden_entries_are_left_out_of_the_listing(client, links_to_hidden):
+    os.symlink(links_to_hidden / ".git" / "pic.png", links_to_hidden / "inside-git.png")
+    assert listed_names(client) == BASE_LISTING
+
+
 @pytest.mark.parametrize("endpoint", FILE_ENDPOINTS)
 @pytest.mark.parametrize("path", ["visible/pic.png", "visible.png", ".docs/notes.txt"])
 def test_links_into_or_through_hidden_entries_are_404(client, links_to_hidden, endpoint, path):
@@ -130,6 +135,15 @@ def test_is_hidden_checks_the_flag(flagged_share):
 
 
 def test_flagged_entries_are_left_out_of_the_listing(client, flagged_share):
+    assert listed_names(client) == BASE_LISTING
+
+
+def test_links_to_flagged_entries_are_left_out_of_the_listing(client, flagged_share):
+    try:
+        os.symlink(flagged_share / "flagged.png", flagged_share / "link.png")
+        os.symlink(flagged_share / "flagged", flagged_share / "link", target_is_directory=True)
+    except OSError:
+        pytest.skip("Can't create symlinks here (Windows without Developer Mode)")
     assert listed_names(client) == BASE_LISTING
 
 
