@@ -12,7 +12,8 @@ import {
 import type { BoxUpdate } from '../codeInput';
 
 interface CodeEntryProps {
-    onSignedIn: () => void;
+    /** Resolves to true once the app has taken over from the form. */
+    onSignedIn: () => Promise<boolean>;
 }
 
 const GROUPS = [[0, 1, 2], [3, 4, 5]];
@@ -47,7 +48,10 @@ export const CodeEntry: React.FC<CodeEntryProps> = ({ onSignedIn }) => {
                 body: JSON.stringify({ code }),
             });
             if (res.ok) {
-                onSignedIn();
+                if (await onSignedIn()) return;
+                // Signed in, but the app couldn't load, so the form is still showing. The code stays for a retry
+                setMessage('Could not load RapydShare. Press Enter to try again.');
+                setBusy(false);
                 return;
             }
             setBoxes(EMPTY_BOXES);
@@ -82,6 +86,9 @@ export const CodeEntry: React.FC<CodeEntryProps> = ({ onSignedIn }) => {
         } else if (e.key === 'ArrowRight') {
             e.preventDefault();
             inputs.current[Math.min(index + 1, CODE_LENGTH - 1)]?.focus();
+        } else if (e.key === 'Enter') {
+            // A form with several boxes and no submit button doesn't submit on Enter by itself
+            handleSubmit(e);
         }
     };
 

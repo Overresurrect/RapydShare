@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { FileItem } from '../types';
 import { X, Download, FileText, AlertCircle } from 'lucide-react';
+import { previewKind } from '../previewKind';
 
 interface PreviewModalProps {
     item: FileItem;
@@ -11,6 +12,7 @@ interface PreviewModalProps {
 export const PreviewModal: React.FC<PreviewModalProps> = ({ item, onClose, onDownload }) => {
     const fileUrl = `/api/view?path=${encodeURIComponent(item.path)}`;
     const [error, setError] = useState(false);
+    const kind = previewKind(item);
 
     // Determine what kind of preview to show
     const renderContent = () => {
@@ -23,16 +25,16 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ item, onClose, onDow
             );
         }
 
-        if (item.type === 'image') {
+        if (kind === 'image') {
             return <img src={fileUrl} className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl" onError={() => setError(true)} />;
         }
         
-        if (item.type === 'video') {
+        if (kind === 'video') {
             return <video src={fileUrl} controls autoPlay className="max-w-full max-h-[85vh] rounded-lg shadow-2xl bg-black" onError={() => setError(true)} />;
         }
 
         // PDF Support
-        if (item.mime === 'application/pdf') {
+        if (kind === 'pdf') {
             return (
                 <iframe 
                     src={fileUrl} 
@@ -42,8 +44,8 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ item, onClose, onDow
             );
         }
 
-        // Text/Code files (Basic support via iframe)
-        if (item.mime?.startsWith('text/') || item.name.endsWith('.txt') || item.name.endsWith('.md') || item.name.endsWith('.py') || item.name.endsWith('.js')) {
+        // Text, code and SVG, which the server sends as plain text in a sandbox
+        if (kind === 'text') {
              return (
                 <iframe 
                     src={fileUrl} 

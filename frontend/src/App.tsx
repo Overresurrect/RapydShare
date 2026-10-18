@@ -11,7 +11,8 @@ import { clsx } from 'clsx';
 function App() {
   const [items, setItems] = useState<FileItem[]>([]);
   const [currentPath, setCurrentPath] = useState('');
-  const [loading, setLoading] = useState(false);
+  // Loading until the session check is done, so an empty folder doesn't flash first
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [previewItem, setPreviewItem] = useState<FileItem | null>(null);
@@ -48,6 +49,7 @@ function App() {
     }
   }, [apiFetch]);
 
+  // True once signed in and loading the files
   const loadSession = useCallback(async () => {
     try {
       const res = await apiFetch('/api/server_info');
@@ -57,9 +59,12 @@ function App() {
       setRequireCode(!!info.require_code);
       setNeedsCode(false);
       fetchFiles('');
+      return true;
     } catch (err) {
       console.error(err);
       setUploadEnabled(false);
+      setLoading(false);
+      return false;
     }
   }, [apiFetch, fetchFiles]);
 
