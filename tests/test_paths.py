@@ -152,6 +152,37 @@ def test_odd_paths_are_a_generic_404(lenient_client, endpoint, path):
     assert r.json() == {"detail": "Not Found"}
 
 
+@pytest.mark.parametrize("endpoint, path", [
+    ("files", "hello.txt"),
+    ("view", "docs"),
+    ("download", "docs"),
+    ("thumb", "docs"),
+    ("thumb", "album.png"),
+], ids=["file-to-files", "folder-to-view", "folder-to-download", "folder-to-thumb", "image-named-folder-to-thumb"])
+def test_wrong_kind_is_a_4xx_not_500(lenient_client, share, endpoint, path):
+    (share / "album.png").mkdir()
+    r = lenient_client.get(f"/api/{endpoint}", params={"path": path})
+    assert 400 <= r.status_code < 500
+
+
+def test_unreadable_folder_is_403(lenient_client, share, monkeypatch):
+    def refuse(path):
+        raise PermissionError(13, "Permission denied", str(path))
+    monkeypatch.setattr("src.server.os.scandir", refuse)
+    r = lenient_client.get("/api/files", params={"path": "docs"})
+    assert r.status_code == 403
+    assert "docs" not in r.text
+
+
+def test_folder_gone_while_listing_is_404(lenient_client, share, monkeypatch):
+    def gone(path):
+        raise FileNotFoundError(2, "No such file or directory", str(path))
+    monkeypatch.setattr("src.server.os.scandir", gone)
+    r = lenient_client.get("/api/files", params={"path": "docs"})
+    assert r.status_code == 404
+    assert r.json() == {"detail": "Not Found"}
+
+
 def test_symlink_loop_is_a_generic_404(lenient_client, share):
     try:
         os.symlink(share / "loop", share / "loop")

@@ -73,7 +73,7 @@ def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
 @app.get("/api/files", dependencies=[Depends(get_current_username)])
 async def list_files(path: str = ""):
     req_path = resolve_in_root(path)
-    if not req_path.exists(): raise HTTPException(404)
+    if not req_path.is_dir(): raise HTTPException(404)
     
     items = []
     try:
@@ -94,6 +94,7 @@ async def list_files(path: str = ""):
                     })
                 except: continue
     except PermissionError: raise HTTPException(403)
+    except OSError: raise HTTPException(404)
     return items
 
 @app.get("/api/thumb", dependencies=[Depends(get_current_username)])
@@ -104,7 +105,7 @@ async def get_thumb(path: str):
     thumb_path = config.THUMB_CACHE_DIR / hash_name
     
     if thumb_path.exists(): return FileResponse(thumb_path)
-    if real_path.exists():
+    if real_path.is_file():
         loop = asyncio.get_event_loop()
         success = await loop.run_in_executor(executor, generate_thumbnail, real_path, thumb_path)
         if success: return FileResponse(thumb_path)
@@ -132,7 +133,7 @@ async def download_folder(path: str):
 @app.get("/api/view", dependencies=[Depends(get_current_username)])
 async def view_media(path: str):
     real_path = resolve_in_root(path)
-    if real_path.exists(): return FileResponse(real_path)
+    if real_path.is_file(): return FileResponse(real_path)
     raise HTTPException(404)
 
 @app.get("/api/server_info", dependencies=[Depends(get_current_username)])
