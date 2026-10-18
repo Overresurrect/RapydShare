@@ -210,4 +210,4 @@ The script also prints a SHA-256 hash for the file.
 
 ## 📄 License
 
-[MIT](LICENSE) © ArthosX
+[MIT](LICENSE) © Aayush Jamuar
