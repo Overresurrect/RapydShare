@@ -3,14 +3,12 @@
 Share files between your computer and any phone, tablet, or laptop on the same Wi-Fi. Pick a folder, click **Start Server**, and scan the QR code (or open the link) in a browser on the other device. There's nothing to install on the other device, and no accounts or cloud services involved.
 
 [![Latest release](https://img.shields.io/github/v/release/Overresurrect/RapydShare)](https://github.com/Overresurrect/RapydShare/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Overresurrect/RapydShare/total)](https://github.com/Overresurrect/RapydShare/releases)
 [![License: MIT](https://img.shields.io/github/license/Overresurrect/RapydShare)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
 
-![RapydShare Screenshot](assets/Screenshot.jpg)\
-*RapydShare desktop app*
-
-![RapydShare Browser Screenshot](assets/Screenshot-Web.jpg)\
-*RapydShare web client*
+![RapydShare on a computer and a phone: the phone enters the access code, browses, previews a photo and uploads one, then the server restarts with a new code](docs/demo.gif)\
+*The desktop app and a phone in one take. The phone enters the access code, browses, previews a photo, and uploads one. Stopping the server signs the phone out, and the next start makes a new code.*
 
 ## 🚀 Features
 
