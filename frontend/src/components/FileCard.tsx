@@ -3,15 +3,20 @@ import type { FileItem } from '../types';
 // FIX: Removed 'Image as ImageIcon' from imports
 import { Folder, FileText, Film, Download } from 'lucide-react';
 import { clsx } from 'clsx';
+import { shortDate } from '../arrange';
 
 interface FileCardProps {
     item: FileItem;
     viewMode: 'grid' | 'list';
+    // Show the date under a thumbnail instead of the size (when sorting by date or type)
+    showDate: boolean;
+    // When the list was loaded, in milliseconds, for Today and Yesterday
+    now: number;
     onClick: (item: FileItem) => void;
     onDownload: (item: FileItem, e: React.MouseEvent) => void;
 }
 
-export const FileCard: React.FC<FileCardProps> = ({ item, viewMode, onClick, onDownload }) => {
+export const FileCard: React.FC<FileCardProps> = ({ item, viewMode, showDate, now, onClick, onDownload }) => {
     
     const formatSize = (bytes: number) => {
         if (bytes === 0) return '0 B';
@@ -87,9 +92,15 @@ export const FileCard: React.FC<FileCardProps> = ({ item, viewMode, onClick, onD
                     {item.name}
                 </h3>
                 <div className="mt-auto flex justify-between items-center pt-2 border-t border-gray-100 dark:border-gray-800">
-                    <span className="text-[10px] text-gray-500 font-medium">
-                        {item.is_dir ? '' : formatSize(item.size)}
-                    </span>
+                    {showDate ? (
+                        <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold">
+                            {shortDate(item.mtime, new Date(now))}
+                        </span>
+                    ) : (
+                        <span className="text-[10px] text-gray-500 font-medium">
+                            {item.is_dir ? '' : formatSize(item.size)}
+                        </span>
+                    )}
                     <button 
                         onClick={(e) => onDownload(item, e)}
                         className="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"

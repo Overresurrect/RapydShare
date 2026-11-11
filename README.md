@@ -27,11 +27,13 @@ Share files between your computer and any phone, tablet, or laptop on the same W
 - Works in any modern browser, on mobile or desktop.
 - Scan the QR code and you're in. If you type the address by hand, enter the access code in six boxes, like a one-time passcode.
 - Browse folders in a grid or list view, and search the current folder.
+- Sort by name, date, size, or type with one tap, and tap again to reverse. Sorting by date, size, or type groups the files under headings like Today, Over 1 GB, or Photos.
+- Show only one type of file, such as photos, videos, or documents, with one tap. Search and the type filter work together.
 - Thumbnails for images and videos.
 - Previews for images, videos, PDFs, and text files.
 - Download single files, or whole folders as a ZIP.
 - Upload several files at once, by picking them or dragging them onto the page, with a progress bar for each one and a cancel button.
-- Light and dark themes. The theme follows your system until you pick one, and the page remembers your theme and view choices.
+- Light and dark themes. The theme follows your system until you pick one, and the page remembers your theme, view, and sort choices.
 
 ## 📦 Installation
 
