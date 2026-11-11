@@ -1,12 +1,23 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react';
 import type { FileItem, UploadTask } from './types';
 import { FileCard } from './components/FileCard';
 import { PreviewModal } from './components/PreviewModal';
 import { UploadManager } from './components/UploadManager';
 import { CodeEntry } from './components/CodeEntry';
+import { ViewControls } from './components/ViewControls';
 import { uploadErrorMessage } from './uploadErrors';
+import { arrange, filterItems, keepFilter, nextSort, parseSort, presentKinds, sortLabel, DEFAULT_SORT } from './arrange';
+import type { Kind, KindFilter, Sort, SortKey } from './arrange';
 import { ArrowLeft, Search, Moon, Sun, LayoutGrid, List, RefreshCw, FolderOpen, Upload, LogOut } from 'lucide-react';
 import { clsx } from 'clsx';
+
+function savedSort(): Sort {
+  try {
+    return parseSort(localStorage.getItem('sortKey'), localStorage.getItem('sortDir'));
+  } catch {
+    return DEFAULT_SORT;
+  }
+}
 
 function App() {
   const [items, setItems] = useState<FileItem[]>([]);
@@ -15,6 +26,11 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [sort, setSort] = useState<Sort>(savedSort);
+  // Cleared whenever another folder loads (see keepFilter), so a folder never looks empty because of it
+  const [kindFilter, setKindFilter] = useState<KindFilter | null>(null);
+  // When the list was loaded, so Today and Yesterday are worked out from one moment
+  const [loadedAt, setLoadedAt] = useState(0);
   const [previewItem, setPreviewItem] = useState<FileItem | null>(null);
   const [isDark, setIsDark] = useState(false);
   const [uploadEnabled, setUploadEnabled] = useState(false);
@@ -41,6 +57,8 @@ function App() {
       const data = await res.json();
       setItems(data);
       setCurrentPath(path);
+      setLoadedAt(Date.now());
+      setKindFilter(filter => keepFilter(filter, path));
       window.scrollTo(0, 0);
     } catch (err) {
       console.error(err);
@@ -112,6 +130,17 @@ function App() {
     const newView = viewMode === 'grid' ? 'list' : 'grid';
     setViewMode(newView);
     localStorage.setItem('viewMode', newView);
+  };
+
+  const handleSort = (key: SortKey) => {
+    const next = nextSort(sort, key);
+    setSort(next);
+    try {
+      localStorage.setItem('sortKey', next.key);
+      localStorage.setItem('sortDir', next.dir);
+    } catch {
+      // Storage can be blocked (private browsing); the sort still applies to this visit
+    }
   };
 
   const handleNavigateUp = () => {
@@ -240,18 +269,26 @@ function App() {
     enqueueFiles(e.dataTransfer.files);
   };
 
-  // --- Filtering & Sorting ---
-  const filteredItems = useMemo(() => {
-    const query = searchQuery.toLowerCase();
-    return items
-      .filter(item => item.name.toLowerCase().includes(query))
-      .sort((a, b) => {
-        // Folders first
-        if (a.is_dir && !b.is_dir) return -1;
-        if (!a.is_dir && b.is_dir) return 1;
-        return a.name.localeCompare(b.name);
-      });
-  }, [items, searchQuery]);
+  // --- Filtering, Sorting & Grouping ---
+  const kinds = useMemo(() => presentKinds(items), [items]);
+  const activeKind = kindFilter && kindFilter.path === currentPath && kinds.some(k => k.kind === kindFilter.kind)
+    ? kindFilter.kind
+    : null;
+  // Tapping the active chip again goes back to everything
+  const handleKind = (kind: Kind | null) =>
+    setKindFilter(kind === null || kind === activeKind ? null : { path: currentPath, kind });
+
+  const filteredItems = useMemo(
+    () => filterItems(items, searchQuery, activeKind),
+    [items, searchQuery, activeKind],
+  );
+  const sections = useMemo(
+    () => arrange(filteredItems, sort, new Date(loadedAt)),
+    [filteredItems, sort, loadedAt],
+  );
+  const showing = filteredItems.length === items.length
+    ? `${items.length} ${items.length === 1 ? 'item' : 'items'}`
+    : `${filteredItems.length} of ${items.length}`;
 
   if (needsCode) return <CodeEntry onSignedIn={loadSession} />;
 
@@ -338,6 +375,17 @@ function App() {
             )}
           </div>
         </div>
+
+        {items.length > 0 && (
+          <ViewControls
+            kinds={kinds}
+            total={items.length}
+            activeKind={activeKind}
+            onKind={handleKind}
+            sort={sort}
+            onSort={handleSort}
+          />
+        )}
       </header>
 
       {/* --- MAIN CONTENT --- */}
@@ -356,20 +404,38 @@ function App() {
           </div>
         )}
 
+        {items.length > 0 && (
+          <p className="px-1 mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {showing} · {sortLabel(sort)}
+          </p>
+        )}
+
         <div className={clsx(
           "pb-20 transition-all",
-          viewMode === 'grid' 
-            ? "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-4" 
+          viewMode === 'grid'
+            ? "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-4"
             : "flex flex-col gap-2"
         )}>
-          {filteredItems.map((item) => (
-            <FileCard 
-              key={item.name} 
-              item={item} 
-              viewMode={viewMode}
-              onClick={handleCardClick}
-              onDownload={handleDownload}
-            />
+          {sections.map((section) => (
+            <Fragment key={section.label ?? 'all'}>
+              {section.label && (
+                <h2 className="col-span-full flex justify-between px-1 pt-4 first:pt-0 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <span>{section.label}</span>
+                  <span>{section.items.length}</span>
+                </h2>
+              )}
+              {section.items.map((item) => (
+                <FileCard
+                  key={item.name}
+                  item={item}
+                  viewMode={viewMode}
+                  showDate={sort.key === 'date' || sort.key === 'type'}
+                  now={loadedAt}
+                  onClick={handleCardClick}
+                  onDownload={handleDownload}
+                />
+              ))}
+            </Fragment>
           ))}
         </div>
       </main>
